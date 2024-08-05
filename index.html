@@ -194,59 +194,87 @@
                     <br>
                     <p>
                     </p>
-                     <!-- 
+                    <style>
+                      table {
+                        border-collapse: collapse;
+                        width: 100%;
+                      }
+                      th, td {
+                        text-align: left;
+                        padding: 12px; /* Added padding */
+                      }
+                      tr td {
+                        border-bottom: 1px solid black; /* Regular row borders */
+                      }
+                      th {
+                        border-bottom: 2px solid black; /* Header border */
+                      }
+                      tr:nth-child(3) td, 
+                      tr:nth-child(5) td {
+                        border-bottom: 2px solid black; /* Darker row borders after 2nd and 4th rows */
+                      }
+                    </style>
+                    </head>
+                    <body>
+                    
                     <table>
-                    <tr> 
-                        <th scope="col">GPU</th>
-                        <th>Target Model</th>
-                        <th>TriForce (ms)</th>
-                        <th>Baseline (ms)</th>
+                      <tr>
+                        <th>Target</th>
+                        <th>Draft</th>
+                        <th>Prefill</th>
+                        <th>Batch Size</th>
+                        <th>Optimal Spec Len</th>
                         <th>Speedup</th>
-                    </tr>
-                    <tr>
-                        <th>1x A100</th>
-                        <td>Llama2-7B-128K</td>
-                        <td>-</td>
-                        <td>24</td>
-                        <td>54</td>
-                    </tr>
-                    <tr>
-                        <th>2x 4090s</th>
-                        <td>Llama2-7B-128K</td>
-                        <td>108</td>
-                        <td>840</td>
-                        <td>7.78x</td>
-                    </tr>
-                    <tr>
-                        <th>2x 4090s</th>
-                        <td>LWM-Text-Chat-128K</td>
-                        <td>114</td>
-                        <td>840</td>
-                        <td>7.37x</td>
-                    </tr>
-                    <tr>
-                        <th>2x 4090s</th>
-                        <td>Llama2-13B-128K</td>
-                        <td>226</td>
-                        <td>1794</td>
-                        <td>7.94x</td>
-                    </tr>
-                    <tr>
-                        <th>1x 4090</th>
-                        <td>Llama2-7B-128K</td>
-                        <td>312</td>
-                        <td>1516*</td>
-                        <td>4.86x</td>
-                    </tr>
-                    <tr>
-                        <th>1x 4090</th>
-                        <td>LWM-Text-Chat-128K</td>
-                        <td>314</td>
-                        <td>1516*</td>
-                        <td>4.83x</td>
-                    </tr>
-                    </table>
-                    -->
+                      </tr>
+                      <tr>
+                        <td>Llama3.1-8B</td>
+                        <td>Selfspec</td>
+                        <td>32000</td>
+                        <td>16</td>
+                        <td>2</td>
+                        <td>1.24</td>
+                      </tr>
+                      <tr>
+                        <td>Llama3.1-8B</td>
+                        <td>Selfspec</td>
+                        <td>32000</td>
+                        <td>32</td>
+                        <td>3</td>
+                        <td>1.42</td>
+                      </tr>
+                      <tr>
+                        <td>Llama2-7B</td>
+                        <td>Selfspec</td>
+                        <td>8000</td>
+                        <td>32</td>
+                        <td>3</td>
+                        <td>1.44</td>
+                      </tr>
+                      <tr>
+                        <td>Llama2-7B</td>
+                        <td>Tinyllama1.1B</td>
+                        <td>8000</td>
+                        <td>32</td>
+                        <td>3</td>
+                        <td>1.60</td>
+                      </tr>
+                      <tr>
+                        <td>Llama2-7B</td>
+                        <td>Selfspec</td>
+                        <td>8000</td>
+                        <td>64</td>
+                        <td>4</td>
+                        <td>1.68</td>
+                      </tr>
+                      <tr>
+                        <td>Llama2-7B</td>
+                        <td>Tinyllama1.1B</td>
+                        <td>8000</td>
+                        <td>64</td>
+                        <td>4</td>
+                        <td>1.84</td>
+                      </tr>
+                    </table>      
                     <br>
                     <h4 class="title is-5" ><img src="static/images/demo.png" style="height: 36px; display: inline; vertical-align: middle;"/>&nbsp; Summarize a Book of 127K Tokens</h4>
                     <p>
