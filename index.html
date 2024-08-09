@@ -49,6 +49,7 @@
   <script type="text/javascript"
     src="http://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML">
   </script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     @font-face {
       font-family: 'TriForceFont';
@@ -58,6 +59,21 @@
     .custom-font {
       font-family: 'TriForceFont', sans-serif !important;
         font-size: 3.0rem;
+    }
+
+    body {
+        background-color: #f5f5f5; /* Adjust this to match your page's gray color */
+    }
+
+    .image-container {
+        background-color: #f5f5f5; /* Same as body background */
+        display: inline-block; /* Or 'block' depending on your layout needs */
+    }
+
+    .image-container img {
+        mix-blend-mode: multiply;
+        max-width: 100%;
+        height: auto;
     }
   </style>
 </head>
@@ -70,7 +86,7 @@
       <div class="container is-max-desktop">
         <div class="columns is-centered">
           <div class="column has-text-centered">
-            <img src="static/images/icons/MagicDec.png" alt="Magic Wand Icon" style="display: inline; height: 3rem; vertical-align: top;">
+            <!-- <img src="static/images/icons/MagicDec.png" alt="Magic Wand Icon" style="display: inline; height: 3rem; vertical-align: top;"> -->
             <h1 class="title is-2 publication-title" style="display: inline;">MagicDec: Breaking the Latency-Throughput Tradeoff for Long Contexts with Speculative Decoding</h1>
             
             <br><br>
@@ -139,8 +155,8 @@
           </h2>
           <div class="content has-text-justified">
             <p>
-                As Large Language Models (LLMs) become more prevalent in applications like interactive chatbots, efficient serving of long context requests has gained significant attention. However, balancing throughput and latency when serving long-context requests remains a challenge, with improvements in one often leading to drawbacks in the other. To tackle this issue, we introduce <b>MagicDec</b>—we show that speculative decoding efficiently handles large batches of long sequences without sacrificing performance.  Speculative decoding demonstrates notable speedups, achieving <b>2x for Llama2-7B-32K and 1.84x for Llama3.1-8B </b>, when serving 32 requests of lengths 32k and 100k, respectively, on 8 NVIDIA A100 GPUs. In addition, we observe and theoretically motivate a critical sequence length beyond which speculative decoding becomes increasingly beneficial for larger batch sizes, highlighting an extensive scope of MagicDec in long context serving.
-                <a style="color: #209CEE" href="https://arxiv.org/abs/2404.11912" target="_blank">paper</a>.
+                As Large Language Models (LLMs) become more prevalent in applications like interactive chatbots, efficient serving of long context requests has gained significant attention. However, balancing throughput and latency when serving long-context requests remains a challenge, with improvements in one often leading to drawbacks in the other. Our method <b>MagicDec</b> uses speculative decoding to handle this issue for large batches of long sequences without sacrificing output quality. We observe and theoretically motivate a critical sequence length beyond which speculative decoding becomes increasingly beneficial for larger batch sizes, highlighting an extensive scope of MagicDec in long context serving. For moderate to long sequences, we demonstrate upto <b>2x speedup for Llama2-7B-32K and 1.84x speedup for Llama3.1-8B </b>, when serving batch sizes ranging from 32 to 256 on 8 NVIDIA A100 GPUs. 
+                <!-- <a style="color: #209CEE" href="https://arxiv.org/abs/2404.11912" target="_blank">paper</a>. -->
             </p>
           </div>
         </div>
@@ -159,23 +175,35 @@
           </h2>
           <div class="content has-text-justified">
             <p>
-              We demonstrate improvements in speedups with increasing batch size across different models and hardware specifications. For speculative decoding, we have chosen two kinds of draft models: (1)
+              To demonstrate improvements in speedups with increasing batch size, we have chosen two kinds of draft models: (1)
               Standalone draft model with GQA (<a style="color: #209CEE" href="https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T">TinyLLaMA-1.1B</a> to speculate <a style="color: #209CEE" href="https://huggingface.co/togethercomputer/LLaMA-2-7B-32K">LLaMA-2-7B-32K</a>) and (2)
               Self-Speculation for Llama-2-7B-32k and and <a style="color: #209CEE" href="https://huggingface.co/meta-llama/Meta-Llama-3.1-8B">Llama-3.1-8B</a>. In both cases, we utilize StreamingLLM in
               drafting to address the KV bottleneck. The performance was evaluated on A100, H100, and L40 devices on <a style="color: #209CEE" href="https://huggingface.co/datasets/emozilla/pg19-test">PG-19</a> dataset.
             </p>
             <h6>Key observations:</h6>
-            <ol style="font-size: 0.9em;">
+            <!-- <ol style="font-size: 0.9em;">
               <li>Speculative Decoding is effective in improving throughput for long enough sequences.</li>
               <li>For every model and hardware pair, there exists a critical sequence length, beyond which
                   speedup increases with increasing batch size—the longer the sequence, the better the
                   speedup scaling.</li>
               <li>For moderate to long sequences, optimal speculation length also increases with batch
                   size.</li>
-            </ol>
+            </ol> -->
+             <p><strong>1. Speculative Decoding achieves better throughput-latency trade-off for moderate to long sequences.</strong></p>
+             <div style="display: flex; flex-wrap: wrap; justify-content: center;">
+              <div style="width: 120%; min-width: 300px; margin: 5px;">
+                  <canvas id="chart1"></canvas>
+              </div>
+              <div style="width: 120%; min-width: 300px; margin: 5px;">
+                  <canvas id="chart2"></canvas>
+              </div>
+            </div>
+             <script src="static/js/plots/throughput_latency.js"></script>
+             <p><strong>2. For every model and hardware pair, there exists a critical sequence length, beyond which speedup increases with increasing batch size—the longer the sequence, the better the speedup scaling.</strong></p>
+             <p><strong>3. Interestingly, the optimal speculation length also increases with batch size for sufficiently long sequences.</strong></p>
           </div>
           <br>
-          <div class="figure">
+          <div class="image-container">
             <img src="static/images/speedups_budget512.png" alt="Results" height="350" />
             <figcaption>
               <strong>Figure 1: End-to-end Speculative Decoding Speedups for Various Target-Draft pairs on 8 NVIDIA A100s.</strong>
@@ -266,7 +294,7 @@
             </tr>
           </table>      
           <br>
-          <h4 class="title is-5">
+          <!-- <h4 class="title is-5">
             <img src="static/images/icons/demo.png" style="height: 36px; display: inline; vertical-align: middle;"/>
             &nbsp; Summarize a Book of 127K Tokens
           </h4>
@@ -277,7 +305,7 @@
             <video poster="" id="video1" autoplay controls muted height="100%">
               <source src="static/videos/TriForce.mp4" type="video/mp4">
             </video>
-          </div>
+          </div> -->
         </div>
       </div>
     </div>
@@ -308,7 +336,7 @@
               Our analysis for a batch size of 256 and a fixed StreamingLLM budget of 512 (Figure 2) shows that as sequences grow, bottlenecks shift from computation to memory. For instance, with a 4k sequence length for Llama-2, KV load times start to dominate as batch size increases.
             </p>
             
-            <div class="figure" style="display: flex; flex-direction: column; align-items: center;">
+            <div class="image-container" style="display: flex; flex-direction: column; align-items: center;">
               <div style="display: flex; justify-content: space-around; width: 100%;">
                 <img src="static/images/kvloadtime.png" alt="KV Load Time" style="height: 250px; width: auto; margin: 0 20px;" />
                 <img src="static/images/arithmetic_intensity.png" alt="Arithmetic Intensity" style="height: 250px; width: auto; margin: 0 20px;" />
@@ -330,7 +358,7 @@
                 <p>
                   A ratio close to 1 is ideal. While this holds true for smaller batch sizes, verification becomes expensive for small sequences as batch size grows. However, for sufficiently long sequences, as inference becomes memory-bound, the verification-to-target ratio approaches 1 again with increasing batch size.
                 </p>
-                <div class="figure" style="display: flex; flex-direction: column; align-items: center;">
+                <div class="image-container" style="display: flex; flex-direction: column; align-items: center;">
                   <div style="display: flex; justify-content: space-around; width: 100%;">
                     <img src="static/images/verification_ratio_llama2self.png" alt="Ratio of Verification vs Target Time" style="height: 250px; width: auto; margin: 0 20px;" />
                   </div>

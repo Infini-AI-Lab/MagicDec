@@ -1,0 +1,6 @@
+Change the Title width - make it 1-2 lines
+32 batchsize is not large. use "upto"
+Rerun some expts to get the missing datapoints
+put the table for A100 instead, as it has 8 TP.
+rerun with flashinfer
+text width modification
