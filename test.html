@@ -208,8 +208,8 @@
               <li>For moderate to long sequences, optimal speculation length also increases with batch
                   size.</li>
             </ol> -->
-             <p><strong>1. Speculative Decoding achieves better throughput-latency trade-off for moderate to long sequences.</strong></p>
-             <div style="display: flex; flex-wrap: wrap; justify-content: center;">
+             <!-- <p><strong>1. Speculative Decoding achieves better throughput-latency trade-off for moderate to long sequences.</strong></p> -->
+             <!-- <div style="display: flex; flex-wrap: wrap; justify-content: center;">
               <div style="width: 120%; min-width: 300px; margin: 5px;">
                   <canvas id="chart1"></canvas>
               </div>
@@ -217,7 +217,37 @@
                   <canvas id="chart2"></canvas>
               </div>
             </div>
-             <script src="static/js/plots/throughput_latency.js"></script>
+             <script src="static/js/plots/throughput_latency.js"></script> -->
+             <!-- <ol style="font-size: 0.9em;">
+              <li>Speculative Decoding is effective in improving throughput for long enough sequences.</li>
+              <li>For every model and hardware pair, there exists a critical sequence length, beyond which
+                  speedup increases with increasing batch size—the longer the sequence, the better the
+                  speedup scaling.</li>
+              <li>For moderate to long sequences, optimal speculation length also increases with batch
+                  size.</li>
+            </ol> -->
+            <p><strong>1. Speculative Decoding achieves better throughput-latency trade-off for moderate to long sequences.</strong></p>
+            <!-- <div style="display: flex; flex-wrap: wrap; justify-content: center;">
+            <div style="width: 60%; min-width: 250px; margin: 5px;">
+                <canvas id="chart1"></canvas>
+            </div>
+            <div style="width: 60%; min-width: 250px; margin: 5px;">
+                <canvas id="chart2"></canvas>
+            </div>
+          </div>
+            <script src="static/js/plots/throughput_latency_smaller.js"></script>
+          
+             -->
+             <div style="display: flex; flex-wrap: wrap; justify-content: center;">
+              <div style="width: 45%; min-width: 150px; margin: 5px;">
+                  <canvas id="chart1"></canvas>
+              </div>
+              <div style="width: 45%; min-width: 150px; margin: 5px;">
+                  <canvas id="chart2"></canvas>
+              </div>
+          </div>
+          <script src="static/js/plots/throughput_latency_smaller.js"></script>
+          
              <p><strong>2. For every model and hardware pair, there exists a critical sequence length, beyond which speedup increases with increasing batch size—the longer the sequence, the better the speedup scaling.</strong></p>
              <p><strong>3. Interestingly, the optimal speculation length also increases with batch size for sufficiently long sequences.</strong></p>
           </div>
