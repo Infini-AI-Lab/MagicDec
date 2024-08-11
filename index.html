@@ -50,6 +50,7 @@
     src="http://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-AMS-MML_HTMLorMML">
   </script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
   <style>
     @font-face {
       font-family: 'TriForceFont';
@@ -75,6 +76,25 @@
         max-width: 100%;
         height: auto;
     }
+
+
+    .container.is-fluid {
+      margin-left: 15px;
+      margin-right: 15px;
+      max-width: none;
+    }
+    
+    .hero .hero-body {
+      padding: 3rem 0;
+    }
+    
+    .section {
+      padding: 3rem 0;
+    }
+    
+    .column.is-full-width {
+      padding: 0 15px;
+    }
   </style>
 </head>
 <body>
@@ -82,11 +102,11 @@
 
 <!-- Section: Header Titlepage -->
 <section class="hero">
-    <div class="hero-body">
-      <div class="container is-max-desktop">
-        <div class="columns is-centered">
-          <div class="column has-text-centered">
-            <!-- <img src="static/images/icons/MagicDec.png" alt="Magic Wand Icon" style="display: inline; height: 3rem; vertical-align: top;"> -->
+  <div class="hero-body">
+    <div class="container is-fluid">
+      <div class="columns is-centered">
+        <div class="column is-four-fifths has-text-centered">
+            <img src="static/images/icons/MagicDec.png" alt="Magic Wand Icon" style="display: inline; height: 3rem; vertical-align: top;">
             <h1 class="title is-2 publication-title" style="display: inline;">MagicDec: Breaking the Latency-Throughput Tradeoff for Long Contexts with Speculative Decoding</h1>
             
             <br><br>
@@ -146,9 +166,9 @@
 
 <!-- Section: Paper abstract -->
 <section class="section hero is-light">
-    <div class="container is-max-desktop">
-      <div class="columns is-centered has-text-centered">
-        <div class="column is-four-fifths">
+  <div class="container is-fluid">
+    <div class="columns is-centered">
+      <div class="column is-four-fifths">
           <h2 class="title is-3" style="text-align: center;">
             <img src="static/images/icons/Llama.png" style="height: 43px; display: inline; vertical-align:text-top;"/>
             &nbsp; Introduction
@@ -166,9 +186,9 @@
 
 <!-- Section: Paper abstract -->
 <section class="section hero is-light">
-    <div class="container is-max-desktop">
-      <div class="columns is-centered has-text-centered">
-        <div class="column is-four-fifths">
+  <div class="container is-fluid">
+    <div class="columns is-centered">
+      <div class="column is-four-fifths">
           <h2 class="title is-3" style="text-align: center;">
             <img src="static/images/icons/timepassing.png" style="height: 50px; display: inline; vertical-align: middle;"/>
             &nbsp; MagicDec: Improvements for Large Batches and Long Sequences
@@ -189,8 +209,8 @@
               <li>For moderate to long sequences, optimal speculation length also increases with batch
                   size.</li>
             </ol> -->
-             <p><strong>1. Speculative Decoding achieves better throughput-latency trade-off for moderate to long sequences.</strong></p>
-             <div style="display: flex; flex-wrap: wrap; justify-content: center;">
+             <!-- <p><strong>1. Speculative Decoding achieves better throughput-latency trade-off for moderate to long sequences.</strong></p> -->
+             <!-- <div style="display: flex; flex-wrap: wrap; justify-content: center;">
               <div style="width: 120%; min-width: 300px; margin: 5px;">
                   <canvas id="chart1"></canvas>
               </div>
@@ -198,7 +218,37 @@
                   <canvas id="chart2"></canvas>
               </div>
             </div>
-             <script src="static/js/plots/throughput_latency.js"></script>
+             <script src="static/js/plots/throughput_latency.js"></script> -->
+             <!-- <ol style="font-size: 0.9em;">
+              <li>Speculative Decoding is effective in improving throughput for long enough sequences.</li>
+              <li>For every model and hardware pair, there exists a critical sequence length, beyond which
+                  speedup increases with increasing batch size—the longer the sequence, the better the
+                  speedup scaling.</li>
+              <li>For moderate to long sequences, optimal speculation length also increases with batch
+                  size.</li>
+            </ol> -->
+            <p><strong>1. Speculative Decoding achieves better throughput-latency trade-off for moderate to long sequences.</strong></p>
+            <!-- <div style="display: flex; flex-wrap: wrap; justify-content: center;">
+            <div style="width: 60%; min-width: 250px; margin: 5px;">
+                <canvas id="chart1"></canvas>
+            </div>
+            <div style="width: 60%; min-width: 250px; margin: 5px;">
+                <canvas id="chart2"></canvas>
+            </div>
+          </div>
+            <script src="static/js/plots/throughput_latency_smaller.js"></script>
+          
+             -->
+             <div style="display: flex; flex-wrap: wrap; justify-content: center;">
+              <div style="width: 45%; min-width: 150px; margin: 5px;">
+                  <canvas id="chart1"></canvas>
+              </div>
+              <div style="width: 45%; min-width: 150px; margin: 5px;">
+                  <canvas id="chart2"></canvas>
+              </div>
+          </div>
+          <script src="static/js/plots/throughput_latency_smaller.js"></script>
+          
              <p><strong>2. For every model and hardware pair, there exists a critical sequence length, beyond which speedup increases with increasing batch size—the longer the sequence, the better the speedup scaling.</strong></p>
              <p><strong>3. Interestingly, the optimal speculation length also increases with batch size for sufficiently long sequences.</strong></p>
           </div>
@@ -314,16 +364,16 @@
 
 <!-- Section: Motivation -->
 <section class="section hero is-light">
-    <div class="container is-max-desktop">
-      <div class="columns is-centered">
-        <div class="column is-four-fifths">
+  <div class="container is-fluid">
+    <div class="columns is-centered">
+      <div class="column is-four-fifths">
           <h2 class="title is-3" style="text-align: center;">
             <img src="static/images/icons/Idea.png" style="height: 50px; display: inline; vertical-align: middle;"/>
             &nbsp; Motivation
           </h2>
           <div class="content has-text-justified">
             <p>
-              Speculative decoding leverages underutilized GPU compute during memory-bound autoregressive decoding. However, prior research [cite hao, deepspeed, etc.] has shown that speculative decoding becomes less effective as batch sizes increase and exhaust the available compute. These challenges have led to speculative decoding being underutilized in batch processing methods.
+              Speculative decoding leverages underutilized GPU compute during memory-bound autoregressive decoding. However, <a href="https://arxiv.org/pdf/2406.14066" rel="external nofollow noopener" target="_blank" style="color: #209CEE;">prior research</a> has shown that speculative decoding becomes less effective as batch sizes increase and exhaust the available compute. These challenges have led to speculative decoding being underutilized in processing large batches. However, we show that for long sequences, a shift in LLM operation bottleneck allows Speculative Decoding to become more effective with larger batch sizes. 
             </p>
             
             <h4 class="title is-5">
@@ -331,21 +381,25 @@
               &nbsp; Shift in Bottleneck from Compute to Memory
             </h4>
             <p>
-              As context length increases, the KV becomes the bottleneck, scaling linearly with batch size. Beyond a critical sequence length, the KV loading time overtakes computation time as the dominant factor (Figure 2). This transition allows speculative decoding's speedup to scale with batch size.
-  
-              Our analysis for a batch size of 256 and a fixed StreamingLLM budget of 512 (Figure 2) shows that as sequences grow, bottlenecks shift from computation to memory. For instance, with a 4k sequence length for Llama-2, KV load times start to dominate as batch size increases.
+              As context length increases, the KV cache loading becomes the primary bottleneck, scaling linearly with batch size (Figure 1). Beyond a critical sequence length that is specific to the model type and hardware specifications, the KV loading time overtakes computation time as the dominant factor (Figure 2). This transition increases speculative decoding's efficacy in two ways - 
+              <ol>
+                <li>Verification to autoregressive time ratio stays close to 1 even for large batches. Hence, even if some speculated tokens are rejected, the time penalty of verifying rejected tokens is relatively less. Besides, verification ensures generation of atleast one token every iteration.</li>
+                <li>Our choice of speculation with StreamingLLM draft becomes increasingly useful, given the draft token acceptance rate is relatively unaffected with increasing sequence length.</li>
+              </ol>  
+              <!-- Our analysis for a batch size of 256 and a fixed StreamingLLM budget of 512 (Figure 2) shows that as sequences grow, bottlenecks shift from computation to memory. For instance, with a 4k sequence length for Llama-2, KV load times start to dominate as batch size increases. -->
+              As Figure 2 shows, the transition happens quickly for non-GQA models like Llama-2-7B as KV memory footprint is relatively larger and arithmetic intensity is relatively low. In addition, for GPUs with larger (peak_FLOPS / memory_bandwith) ratio like H100 and L40, the transition happens at a lower sequence length. 
             </p>
             
             <div class="image-container" style="display: flex; flex-direction: column; align-items: center;">
               <div style="display: flex; justify-content: space-around; width: 100%;">
-                <img src="static/images/kvloadtime.png" alt="KV Load Time" style="height: 250px; width: auto; margin: 0 20px;" />
-                <img src="static/images/arithmetic_intensity.png" alt="Arithmetic Intensity" style="height: 250px; width: auto; margin: 0 20px;" />
+                <img src="static/images/kvloadtime.png" alt="KV Load Time" style="height: 400px; width: 400px; margin: 0 10px;" />
+                <img src="static/images/arithmetic_intensity.png" alt="Arithmetic Intensity" style="height: 400px; width: 400px; margin: 0 10px;" />
               </div>
               <figcaption style="margin-top: 10px; text-align: center;">
-                <strong>Figure 2: (Left) KV, weights, activations, and compute times for different batch sizes </strong>(Self Speculation LLaMA-2-7B with Budget 512, Prefill 4096)
+                <strong>Figure 2: (Left) KV, weights, activations, and compute times for different batch sizes </strong>(Self Speculation LLaMA-2-7B, Prefill length 4000)
                 <br> 
-                <strong>(Right) Theoretical Arithmetic Intensity vs prefill length </strong>
-                (Self Speculation for LLaMA-2-7B and LLaMA-3.1-8B with Budget 512, Batch Size 256)
+                <strong>(Right) Theoretical Arithmetic Intensity vs prefill length for different kinds of GPUs</strong>
+                (LLaMA-2-7B and LLaMA-3.1-8B models, Batch Size 256)
               </figcaption>
             </div>
             <br>
@@ -356,15 +410,17 @@
             <div style="display: flex; align-items: top; gap: 10px;">
               <div style="flex: 1;">
                 <p>
-                  A ratio close to 1 is ideal. While this holds true for smaller batch sizes, verification becomes expensive for small sequences as batch size grows. However, for sufficiently long sequences, as inference becomes memory-bound, the verification-to-target ratio approaches 1 again with increasing batch size.
+                  <!-- A ratio close to 1 is ideal. While this holds true for smaller batch sizes, verification becomes expensive for small sequences as batch size grows. However, for sufficiently long sequences, as inference becomes memory-bound, the verification-to-target ratio approaches 1 again with increasing batch size. -->
+                  A low verification to target cost ratio is ideal for speculative decoding. While this ratio remains close to 1 for smaller batch sizes, verification becomes expensive for small sequences as batch size grows. For small batch sizes and moderately long sequences, the model loading time is the main bottleneck which gets amortized by parallel verification of speculated tokens. However, with increasing batch size, LLM becomes more compute-bound, and the verification-to-target ratio increases. Consequently, the target model spends more time verifying speculated tokens that are ultimately rejected, wasting compute resources. However, for sufficiently long sequences, as bottleneck shifts to KV-loading, the verification-to-target ratio stays close to 1 even for large batches. Although verification can not amortize the cost of model loading time anymore, the increase KV loading time dominates over the computation time, making verification relatively less expensive. 
                 </p>
                 <div class="image-container" style="display: flex; flex-direction: column; align-items: center;">
                   <div style="display: flex; justify-content: space-around; width: 100%;">
-                    <img src="static/images/verification_ratio_llama2self.png" alt="Ratio of Verification vs Target Time" style="height: 250px; width: auto; margin: 0 20px;" />
+                    <img src="static/images/ver_2_reg_llama2.png" alt="Ratio of Verification vs Target Time" style="height: 400px; width: 400px; margin: 0 10px;" />
+                    <img src="static/images/ver_2_reg_llama3.png" alt="Ratio of Verification vs Target Time" style="height: 400px; width: 400px; margin: 0 10px;" />
                   </div>
                   <figcaption style="margin-top: 10px; text-align: center;">
                     <strong>Figure 3: Theoretical Ratio of Verification to Target Time vs Batch Size</strong>
-                    (Self Speculation LLaMA-2-7B with Budget 512, Prefill 4096)
+                    (left: LLaMA-2-7B, right: LLaMA-3.1-8B)
                   </figcaption>
                 </div>
               </div>
@@ -375,7 +431,8 @@
               &nbsp; Draft vs Target Latency
             </h4>
             <p>
-              A low draft to target cost ratio (0) is ideal. However as sequence lengths and batch sizes grow, KV scales linearly. In this regime, using StreamingLLM with a fixed budget is particularly effective, as the ratio of draft cost to target autoregressive cost approaches 0.
+              A low draft to target cost ratio is ideal for speculative decoding. Although a small draft model is usually used to speculate tokens, the shift in bottlenecks has opened up the possibility of using better strategies for drafting. To tackle the problem of KV cache loading bottleneck, we have taken inspiration from <a href="https://arxiv.org/pdf/2404.11912" rel="external nofollow noopener" target="_blank" style="color: #209CEE;">Triforce</a>. We use StreamingLLM to draft tokens, which is particularly effective because of small KV loading time. For large batch sizes, the draft cost increases mostly because of increased computation time. However, the target cost increases even more because of increased KV loading time. This makes the draft-to-target cost ratio decrease with increasing batch size, making speculative decoding more effective.
+              <!-- However as sequence lengths and batch sizes grow, KV scales linearly. In this regime, using StreamingLLM with a fixed budget is particularly effective, as the ratio of draft cost to target autoregressive cost approaches 0. -->
             </p>
           </div>
         </div>
@@ -386,10 +443,10 @@
 
   <!-- Section: Conclusion and Future Work -->
   <section class="section hero is-light">
-    <div class="container is-max-desktop">
-      <div class="columns is-centered has-text-centered">
+    <div class="container is-fluid">
+      <div class="columns is-centered">
         <div class="column is-four-fifths">
-          <h2 class="title is-3">
+          <h2 class="title is-3" style="text-align: center;">
             <img src="static/images/icons/Telescope.png" style="height: 50px; display: inline; vertical-align: middle;"/>
             &nbsp; Conclusion and Future Work
           </h2>
@@ -398,7 +455,7 @@
               This work reassesses the trade-off between throughput and latency in long-context scenarios. We show that <em>speculative decoding can enhance throughput, reduce latency, and maintain accuracy</em>. Our theoretical and empirical analysis reveals that as the sequence length and batch size increase, bottlenecks shift from being compute-bound to memory-bound. This shift enables effective use of speculative decoding for longer sequences, even with large batch sizes, achieving up to <strong>2x </strong> speedup for LLaMA-2-7B-32K and <strong>1.84x</strong> for LLaMA-3.1-8B on 8 A100 GPUs. These results highlight the need to integrate speculative decoding into throughput optimization systems as long-context workloads become more common.
             </p>
           </div>
-          <div class="figure">
+          <div class="has-text-centered">
             <img src="static/images/icons/MagicDec.png" alt="<i>TriForce</i>" width="200" height="200" />
           </div>
         </div>
@@ -406,7 +463,7 @@
     </div>
   </section>
   
-
+  
   <!-- Section: References -->
   <section class="section" id="BibTeX">
     <div class="container is-max-desktop content">
@@ -421,9 +478,9 @@
   </section>
   
   <footer class="footer">
-    <div class="container">
+    <div class="container is-fluid">
       <div class="columns is-centered">
-        <div class="column is-8">
+        <div class="column is-four-fifths">
           <div class="content">
             <p>
               This page was built using the <a href="https://github.com/eliahuhorwitz/Academic-project-page-template" target="_blank">Academic Project Page Template</a> which was adopted from the <a href="https://nerfies.github.io" target="_blank">Nerfies</a> project page.
