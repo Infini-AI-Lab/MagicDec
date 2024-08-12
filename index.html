@@ -432,6 +432,16 @@
             </h4>
             <p>
               A low draft to target cost ratio is ideal for speculative decoding. Although a small draft model is usually used to speculate tokens, the shift in bottlenecks has opened up the possibility of using better strategies for drafting. To tackle the problem of KV cache loading bottleneck, we have taken inspiration from <a href="https://arxiv.org/pdf/2404.11912" rel="external nofollow noopener" target="_blank" style="color: #209CEE;">Triforce</a>. We use StreamingLLM to draft tokens, which is particularly effective because of small KV loading time. For large batch sizes, the draft cost increases mostly because of increased computation time. However, the target cost increases even more because of increased KV loading time. This makes the draft-to-target cost ratio decrease with increasing batch size, making speculative decoding more effective.
+              <div class="image-container" style="display: flex; flex-direction: column; align-items: center;">
+                <div style="display: flex; justify-content: space-around; width: 100%;">
+                  <img src="static/images/draft_to_target_llama2.png" alt="Ratio of Draft vs Target Time" style="height: 400px; width: 400px; margin: 0 10px;" />
+                  <img src="static/images/draft_to_target_llama3.png" alt="Ratio of Draft vs Target Time" style="height: 400px; width: 400px; margin: 0 10px;" />
+                </div>
+                <figcaption style="margin-top: 10px; text-align: center;">
+                  <strong>Figure 3: Theoretical Ratio of Draft (StreamingLLM budget=256) to Target Time vs Batch Size</strong>
+                  (left: LLaMA-2-7B, right: LLaMA-3.1-8B)
+                </figcaption>
+              </div>
               <!-- However as sequence lengths and batch sizes grow, KV scales linearly. In this regime, using StreamingLLM with a fixed budget is particularly effective, as the ratio of draft cost to target autoregressive cost approaches 0. -->
             </p>
           </div>
