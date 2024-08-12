@@ -175,7 +175,7 @@
           </h2>
           <div class="content has-text-justified">
             <p>
-                As Large Language Models (LLMs) become more prevalent in applications like interactive chatbots, efficient serving of long context requests has gained significant attention. However, balancing throughput and latency when serving long-context requests remains a challenge, with improvements in one often leading to drawbacks in the other. Our method <b>MagicDec</b> uses speculative decoding to handle this issue for large batches of long sequences without sacrificing output quality. We observe and theoretically motivate a critical sequence length beyond which speculative decoding becomes increasingly beneficial for larger batch sizes, highlighting an extensive scope of MagicDec in long context serving. For moderate to long sequences, we demonstrate upto <b>2x speedup for Llama2-7B-32K and 1.84x speedup for Llama3.1-8B </b>, when serving batch sizes ranging from 32 to 256 on 8 NVIDIA A100 GPUs. 
+                As Large Language Models (LLMs) become more prevalent in applications like interactive chatbots, efficiently serving long context requests has gained significant attention. However, balancing throughput and latency when serving long-context requests remains a challenge, with improvements in one often leading to drawbacks in the other. Our method <b>MagicDec</b> uses speculative decoding to handle this issue for large batches of long sequences without sacrificing output quality. We provide empirical observations and theoretical motivation for a critical sequence length beyond which speculative decoding becomes increasingly beneficial for larger batch sizes. This finding highlighs an extensive scope of MagicDec in long context serving. For moderate to long sequences, we demonstrate upto <b>2x speedup for Llama2-7B-32K and 1.84x speedup for Llama3.1-8B</b>, when serving batch sizes ranging from 32 to 256 on 8 NVIDIA A100 GPUs. 
                 <!-- <a style="color: #209CEE" href="https://arxiv.org/abs/2404.11912" target="_blank">paper</a>. -->
             </p>
           </div>
@@ -195,7 +195,7 @@
           </h2>
           <div class="content has-text-justified">
             <p>
-              To demonstrate improvements in speedups with increasing batch size, we have chosen two kinds of draft models: (1)
+              To demonstrate improvements in speedups with increasing batch size, we evaluated two types of draft models: (1)
               Standalone draft model with GQA (<a style="color: #209CEE" href="https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T">TinyLLaMA-1.1B</a> to speculate <a style="color: #209CEE" href="https://huggingface.co/togethercomputer/LLaMA-2-7B-32K">LLaMA-2-7B-32K</a>) and (2)
               Self-Speculation for Llama-2-7B-32k and and <a style="color: #209CEE" href="https://huggingface.co/meta-llama/Meta-Llama-3.1-8B">Llama-3.1-8B</a>. In both cases, we utilize StreamingLLM in
               drafting to address the KV bottleneck. The performance was evaluated on A100, H100, and L40 devices on <a style="color: #209CEE" href="https://huggingface.co/datasets/emozilla/pg19-test">PG-19</a> dataset.
@@ -253,12 +253,15 @@
              <p><strong>3. Interestingly, the optimal speculation length also increases with batch size for sufficiently long sequences.</strong></p>
           </div>
           <br>
-          <div class="image-container">
+          <div id="figure-1" class="image-container">
             <img src="static/images/speedups_budget512.png" alt="Results" height="350" />
-            <figcaption>
-              <strong>Figure 1: End-to-end Speculative Decoding Speedups for Various Target-Draft pairs on 8 NVIDIA A100s.</strong>
+            <figcaption style="font-size: 0.9em;">
+              <!-- <strong>Figure 1: End-to-end Speculative Decoding Speedups for Various Target-Draft pairs on 8 NVIDIA A100s.</strong> -->
+              <strong>  
+                Figure 1: End-to-end Speculative Decoding Speedups on 8 NVIDIA A100s </strong>. (a) TinyLLaMA-1.1B Draft with LLaMA-2-7B-32K Target, (b) LLaMA-2-7B-32K Self-Speculation, (c) LLaMA-3.1-8B Self-Speculation.
             </figcaption>
           </div>
+
           <br>
           <br>
           <style>
@@ -373,7 +376,7 @@
           </h2>
           <div class="content has-text-justified">
             <p>
-              Speculative decoding leverages underutilized GPU compute during memory-bound autoregressive decoding. However, <a href="https://arxiv.org/pdf/2406.14066" rel="external nofollow noopener" target="_blank" style="color: #209CEE;">prior research</a> has shown that speculative decoding becomes less effective as batch sizes increase and exhaust the available compute. These challenges have led to speculative decoding being underutilized in processing large batches. However, we show that for long sequences, a shift in LLM operation bottleneck allows Speculative Decoding to become more effective with larger batch sizes. 
+              Speculative decoding leverages underutilized GPU compute during memory-bound autoregressive decoding. However, <a href="https://arxiv.org/pdf/2406.14066" rel="external nofollow noopener" target="_blank" style="color: #209CEE;">prior research</a> has shown that speculative decoding becomes less effective as batch sizes increase and exhaust the available compute. These challenges have led to speculative decoding being underutilized in processing large batches. However, we show that for long sequences, a shift in LLM operation bottleneck allows speculative decoding to become more effective with larger batch sizes. 
             </p>
             
             <h4 class="title is-5">
@@ -381,25 +384,30 @@
               &nbsp; Shift in Bottleneck from Compute to Memory
             </h4>
             <p>
-              As context length increases, the KV cache loading becomes the primary bottleneck, scaling linearly with batch size (Figure 1). Beyond a critical sequence length that is specific to the model type and hardware specifications, the KV loading time overtakes computation time as the dominant factor (Figure 2). This transition increases speculative decoding's efficacy in two ways - 
+              As context length increases, the KV cache loading becomes the primary bottleneck, scaling linearly with batch size (<a href="#figure-2">Figure 2-a</a>). Beyond a critical sequence length that is specific to the model type and hardware specifications, the KV loading time overtakes computation time as the dominant factor (<a href="#figure-2">Figure 2</a>). This transition increases speculative decoding's efficacy in two ways - 
               <ol>
-                <li>Verification to autoregressive time ratio stays close to 1 even for large batches. Hence, even if some speculated tokens are rejected, the time penalty of verifying rejected tokens is relatively less. Besides, verification ensures generation of atleast one token every iteration.</li>
-                <li>Our choice of speculation with StreamingLLM draft becomes increasingly useful, given the draft token acceptance rate is relatively unaffected with increasing sequence length.</li>
+                <li>Verification to autoregressive time ratio stays close to 1 even for large batches. Hence, even if some speculated tokens are rejected, the time penalty of verifying rejected tokens is relatively low. Besides, verification ensures generation of atleast one token every iteration.</li>
+                <!-- <li>Our choice of speculation with StreamingLLM draft becomes increasingly useful, given the draft token acceptance rate is relatively unaffected with increasing sequence length.</li> -->
+                 <li>
+                  Our choice of speculation with StreamingLLM draft becomes increasingly useful as KV scales with sequence length but the draft token acceptance rate is relatively unaffected.
+                 </li>
               </ol>  
               <!-- Our analysis for a batch size of 256 and a fixed StreamingLLM budget of 512 (Figure 2) shows that as sequences grow, bottlenecks shift from computation to memory. For instance, with a 4k sequence length for Llama-2, KV load times start to dominate as batch size increases. -->
-              As Figure 2 shows, the transition happens quickly for non-GQA models like Llama-2-7B as KV memory footprint is relatively larger and arithmetic intensity is relatively low. In addition, for GPUs with larger (peak_FLOPS / memory_bandwith) ratio like H100 and L40, the transition happens at a lower sequence length. 
+              
+              As <a href="#figure-2">Figure 2</a> shows, this transition happens quickly for non-GQA models like Llama-2-7B due to their larger KV memory footprint and lower arithmetic intensity. Additionally, for GPUs with a higher (peak_FLOPS / memory_bandwidth) ratio, such as the H100 and L40, this transition happens at shorter sequence lengths.
+              <!-- as KV memory footprint is relatively larger and arithmetic intensity is relatively low. In addition, for GPUs with larger (peak_FLOPS / memory_bandwith) ratio like H100 and L40, the transition happens at a lower sequence length.  -->
             </p>
             
-            <div class="image-container" style="display: flex; flex-direction: column; align-items: center;">
+            <div id="figure-2" class="image-container" style="display: flex; flex-direction: column; align-items: center;">
               <div style="display: flex; justify-content: space-around; width: 100%;">
                 <img src="static/images/kvloadtime.png" alt="KV Load Time" style="height: 400px; width: 400px; margin: 0 10px;" />
                 <img src="static/images/arithmetic_intensity.png" alt="Arithmetic Intensity" style="height: 400px; width: 400px; margin: 0 10px;" />
               </div>
               <figcaption style="margin-top: 10px; text-align: center;">
-                <strong>Figure 2: (Left) KV, weights, activations, and compute times for different batch sizes </strong>(Self Speculation LLaMA-2-7B, Prefill length 4000)
+                <strong>Figure 2: (a) KV, weights, activations, and compute times for different batch sizes </strong>(Self Speculation LLaMA-2-7B, Prefill length 4000) on the left
                 <br> 
-                <strong>(Right) Theoretical Arithmetic Intensity vs prefill length for different kinds of GPUs</strong>
-                (LLaMA-2-7B and LLaMA-3.1-8B models, Batch Size 256)
+                <strong>(b) Theoretical Arithmetic Intensity vs prefill length for different kinds of GPUs</strong>
+                (LLaMA-2-7B and LLaMA-3.1-8B models, Batch Size 256) on the right
               </figcaption>
             </div>
             <br>
@@ -411,7 +419,13 @@
               <div style="flex: 1;">
                 <p>
                   <!-- A ratio close to 1 is ideal. While this holds true for smaller batch sizes, verification becomes expensive for small sequences as batch size grows. However, for sufficiently long sequences, as inference becomes memory-bound, the verification-to-target ratio approaches 1 again with increasing batch size. -->
-                  A low verification to target cost ratio is ideal for speculative decoding. While this ratio remains close to 1 for smaller batch sizes, verification becomes expensive for small sequences as batch size grows. For small batch sizes and moderately long sequences, the model loading time is the main bottleneck which gets amortized by parallel verification of speculated tokens. However, with increasing batch size, LLM becomes more compute-bound, and the verification-to-target ratio increases. Consequently, the target model spends more time verifying speculated tokens that are ultimately rejected, wasting compute resources. However, for sufficiently long sequences, as bottleneck shifts to KV-loading, the verification-to-target ratio stays close to 1 even for large batches. Although verification can not amortize the cost of model loading time anymore, the increase KV loading time dominates over the computation time, making verification relatively less expensive. 
+                  A low verification to target cost ratio is ideal for speculative decoding. While this ratio remains close to 1 for smaller batch sizes, verification becomes costly for small sequences as batch size grows.
+                
+                  For small batch sizes and moderately long sequences, the model loading time is the main bottleneck which gets amortized by parallel verification of speculated tokens. However, with increasing batch size, LLM becomes more compute-bound, and the verification-to-target ratio increases. 
+                  
+                  Consequently, the target model spends more time verifying speculated tokens that are ultimately rejected, wasting compute resources. However, for sufficiently long sequences, as bottleneck shifts to KV-loading, the verification-to-target ratio stays close to 1 even for large batches. 
+                  
+                  Although verification can not amortize the cost of model loading time anymore, the increase KV loading time dominates over the computation time, making verification relatively less expensive. 
                 </p>
                 <div class="image-container" style="display: flex; flex-direction: column; align-items: center;">
                   <div style="display: flex; justify-content: space-around; width: 100%;">
@@ -431,18 +445,23 @@
               &nbsp; Draft vs Target Latency
             </h4>
             <p>
-              A low draft to target cost ratio is ideal for speculative decoding. Although a small draft model is usually used to speculate tokens, the shift in bottlenecks has opened up the possibility of using better strategies for drafting. To tackle the problem of KV cache loading bottleneck, we have taken inspiration from <a href="https://arxiv.org/pdf/2404.11912" rel="external nofollow noopener" target="_blank" style="color: #209CEE;">Triforce</a>. We use StreamingLLM to draft tokens, which is particularly effective because of small KV loading time. For large batch sizes, the draft cost increases mostly because of increased computation time. However, the target cost increases even more because of increased KV loading time. This makes the draft-to-target cost ratio decrease with increasing batch size, making speculative decoding more effective.
+              A low draft to target cost ratio is ideal for speculative decoding. Although a small draft model is usually used to speculate tokens, the shift in bottlenecks opens up the possibility of using better strategies for drafting. 
+
+              To tackle the KV cache loading bottleneck, we have taken inspiration from <a href="https://arxiv.org/pdf/2404.11912" rel="external nofollow noopener" target="_blank" style="color: #209CEE;">Triforce</a>. We use StreamingLLM to draft tokens, which is particularly effective because of small KV loading time.
+              
+              While the draft cost increases with larger batch sizes mainly due to increased computation time, the target cost rises even more due to the greater KV loading time.
+              <!-- For large batch sizes, the draft cost increases mostly because of increased computation time. However, the target cost increases even more because of increased KV loading time. -->
+              This makes the draft-to-target cost ratio decrease with increasing batch size, making speculative decoding more effective.
               <div class="image-container" style="display: flex; flex-direction: column; align-items: center;">
                 <div style="display: flex; justify-content: space-around; width: 100%;">
                   <img src="static/images/draft_to_target_llama2.png" alt="Ratio of Draft vs Target Time" style="height: 400px; width: 400px; margin: 0 10px;" />
                   <img src="static/images/draft_to_target_llama3.png" alt="Ratio of Draft vs Target Time" style="height: 400px; width: 400px; margin: 0 10px;" />
                 </div>
                 <figcaption style="margin-top: 10px; text-align: center;">
-                  <strong>Figure 3: Theoretical Ratio of Draft (StreamingLLM budget=256) to Target Time vs Batch Size</strong>
+                  <strong>Figure 4: Theoretical Ratio of Draft (StreamingLLM budget=256) to Target Time vs Batch Size</strong>
                   (left: LLaMA-2-7B, right: LLaMA-3.1-8B)
                 </figcaption>
               </div>
-              <!-- However as sequence lengths and batch sizes grow, KV scales linearly. In this regime, using StreamingLLM with a fixed budget is particularly effective, as the ratio of draft cost to target autoregressive cost approaches 0. -->
             </p>
           </div>
         </div>
@@ -462,7 +481,7 @@
           </h2>
           <div class="content has-text-justified">
             <p>
-              This work reassesses the trade-off between throughput and latency in long-context scenarios. We show that <em>speculative decoding can enhance throughput, reduce latency, and maintain accuracy</em>. Our theoretical and empirical analysis reveals that as the sequence length and batch size increase, bottlenecks shift from being compute-bound to memory-bound. This shift enables effective use of speculative decoding for longer sequences, even with large batch sizes, achieving up to <strong>2x </strong> speedup for LLaMA-2-7B-32K and <strong>1.84x</strong> for LLaMA-3.1-8B on 8 A100 GPUs. These results highlight the need to integrate speculative decoding into throughput optimization systems as long-context workloads become more common.
+              This work reassesses the trade-off between throughput and latency in long-context scenarios. We demonstrate that <strong>speculative decoding can enhance throughput, reduce latency, and maintain accuracy</strong>. Our theoretical and empirical analysis reveals that as the sequence length and batch size increase, bottlenecks shift from being compute-bound to memory-bound. This shift enables effective use of speculative decoding for longer sequences, even with large batch sizes, achieving up to <strong>2x </strong> speedup for LLaMA-2-7B-32K and <strong>1.84x</strong> for LLaMA-3.1-8B on 8 A100 GPUs. These results highlight the importance of integrating speculative decoding into throughput optimization systems as long-context workloads become more prevalent.
             </p>
           </div>
           <div class="has-text-centered">
