@@ -382,10 +382,11 @@
             </p>
 
             <h4 class="title is-5">
-              <img src="static/images/icons/Switch.png" style="height: 36px; display: inline; vertical-align: middle;"/>
-              &nbsp; Mathematical Formulation for Speedup Breakdown 
+              <img src="static/images/icons/MathematicsCompass.png" style="height: 36px; display: inline; vertical-align: middle;"/>
+              &nbsp;Analytical Breakdown of Speedup in Speculative Decoding 
             </h4>
-            <p>Given a speculation length γ for a sequence of length S and batch size B, let T<sub>T</sub>(B, S, 1) and T<sub>D</sub>(B, S, 1) denote the times taken by the target and draft models to decode one token, respectively. The verification time, T<sub>V</sub>(B, S, γ), is the time it takes the target model to verify the γ tokens speculated by the draft model in a single forward pass. Given an acceptance rate α ∈ [0, 1] and speculation length γ, Ω(γ, α) represents the expected number of tokens generated in one verification step, described as,</p>
+            <p>Given a speculation length γ for a sequence of length S and batch size B, let T<sub>T</sub>(B, S, 1) and T<sub>D</sub>(B, S, 1) denote the times taken by the target and draft models to decode one token, respectively. The verification time, T<sub>V</sub>(B, S, γ), is the time it takes the target model to verify the γ tokens speculated by the draft model in a single forward pass. Given an acceptance rate α ∈ [0, 1] and speculation length γ, Ω(γ, α) represents the expected number of tokens generated in one verification step, described as:</p>
+            
 
             <div style="text-align: center;">
               <math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
@@ -496,81 +497,82 @@
               </math>
             </div>
 
-            <p>If we take a ratio of the latency of speculative decoding and regular autoregressive decoding, we can break down the ratio as following,</p>
+            <p>If we take a ratio of the latency of speculative decoding and regular autoregressive decoding, we can break down the ratio as following:</p>
 
             <div style="text-align: center;">
-              <math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
-                  <mrow>
-                      <mfrac>
-                          <mrow>
-                              <msubsup>
-                                  <mi>T</mi>
-                                  <mtext>Avg</mtext>
-                                  <mtext>SD</mtext>
-                              </msubsup>
-                          </mrow>
-                          <mrow>
-                              <msub>
-                                  <mi>T</mi>
-                                  <mi>T</mi>
-                              </msub>
-                          </mrow>
-                      </mfrac>
-                      <mo>=</mo>
-                      <mfrac>
-                          <mn>1</mn>
-                          <mrow>
-                              <mi>Ω</mi>
-                              <mo stretchy="true">(</mo>
-                              <mi>γ</mi>
-                              <mo>,</mo>
-                              <mi>α</mi>
-                              <mo stretchy="true">)</mo>
-                          </mrow>
-                      </mfrac>
-                      <mo stretchy="true">(</mo>
-                      <mfrac>
-                          <mrow>
-                              <mi>γ</mi>
-                              <mo>⋅</mo>
-                              <msub>
-                                  <mi>T</mi>
-                                  <mi>D</mi>
-                              </msub>
-                          </mrow>
-                          <msub>
-                              <mi>T</mi>
-                              <mi>T</mi>
-                          </msub>
-                      </mfrac>
-                      <mo>+</mo>
-                      <mfrac>
-                          <mrow>
-                              <msub>
-                                  <mi>T</mi>
-                                  <mi>V</mi>
-                              </msub>
-                              <mo stretchy="true">(</mo>
-                              <mi>γ</mi>
-                              <mo stretchy="true">)</mo>
-                          </mrow>
-                          <msub>
-                              <mi>T</mi>
-                              <mi>T</mi>
-                          </msub>
-                      </mfrac>
-                      <mo stretchy="true">)</mo>
-                  </mrow>
-              </math>
+                <math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
+                    <mrow>
+                        <mfrac>
+                            <mrow>
+                                <msubsup>
+                                    <mi>T</mi>
+                                    <mtext>Avg</mtext>
+                                    <mtext>SD</mtext>
+                                </msubsup>
+                            </mrow>
+                            <mrow>
+                                <msub>
+                                    <mi>T</mi>
+                                    <mi>T</mi>
+                                </msub>
+                            </mrow>
+                        </mfrac>
+                        <mo>=</mo>
+                        <mfrac>
+                            <mn>1</mn>
+                            <mrow>
+                                <mi>Ω</mi>
+                                <mo stretchy="true">(</mo>
+                                <mi>γ</mi>
+                                <mo>,</mo>
+                                <mi>α</mi>
+                                <mo stretchy="true">)</mo>
+                            </mrow>
+                        </mfrac>
+                        <mo stretchy="true">(</mo>
+                        <mfrac>
+                            <mrow>
+                                <mi>γ</mi>
+                                <mo>⋅</mo>
+                                <msub>
+                                    <mi>T</mi>
+                                    <mi>D</mi>
+                                </msub>
+                            </mrow>
+                            <msub>
+                                <mi>T</mi>
+                                <mi>T</mi>
+                            </msub>
+                        </mfrac>
+                        <mo>+</mo>
+                        <mfrac>
+                            <mrow>
+                                <msub>
+                                    <mi>T</mi>
+                                    <mi>V</mi>
+                                </msub>
+                                <mo stretchy="true">(</mo>
+                                <mi>γ</mi>
+                                <mo stretchy="true">)</mo>
+                            </mrow>
+                            <msub>
+                                <mi>T</mi>
+                                <mi>T</mi>
+                            </msub>
+                        </mfrac>
+                        <mo stretchy="true">)</mo>
+                    </mrow>
+                </math>
             </div>
             
             <p>From this mathematical formulation, we can note that:
               <ol>
-                <li>Ideally T<sub>D</sub> / T<sub>T</sub> should be close to 0. We shall show how this ratio changes with batch size for different sequence lengths.</li>
-                <li>Ideally T<sub>V</sub> / T<sub>T</sub> ratio should be close to 1. We shall how this ratio stays close to 1 for moderate to long sequences even in high batch size regime.</li>
-                <li>Ω(γ, α) should ideally be high. Although this quantity is not expected to change with batch size because of the i.i.d assumption for the batched sequences.</li>
+                <li>Ideally T<sub>D</sub> / T<sub>T</sub> should be close to 0. We will show how this ratio changes with batch size for different sequence lengths.</li>
+                <li>Ideally T<sub>V</sub> / T<sub>T</sub> ratio should be close to 1. We will demonstrate how this ratio stays close to 1 for moderate to long sequences even in high batch size regime.</li>
+                <li>Ω(γ, α) should ideally be high. Although this quantity is not expected to change with batch size due to the i.i.d assumption for the batched sequences.</li>
+                
               </ol>
-              However, to understand the trends of these individual quantities, we need to understand how the bottleneck of the LLM operation changes with batch size and sequence length.
+              To fully understand the trends of these individual quantities, we need to consider how the bottleneck of LLM operation changes with batch size and sequence length.
             </p>
             
             <h4 class="title is-5">
