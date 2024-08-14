@@ -258,7 +258,7 @@
             <figcaption style="font-size: 0.9em;">
               <!-- <strong>Figure 1: End-to-end Speculative Decoding Speedups for Various Target-Draft pairs on 8 NVIDIA A100s.</strong> -->
               <strong>  
-                Figure 1: End-to-end Speculative Decoding Speedups on 8 NVIDIA A100s </strong>. (a) TinyLLaMA-1.1B Draft with LLaMA-2-7B-32K Target, (b) LLaMA-2-7B-32K Self-Speculation, (c) LLaMA-3.1-8B Self-Speculation.
+                Figure 1: End-to-end Speculative Decoding Speedups (with optimal speculation length) on 8 NVIDIA A100s. </strong> (a) TinyLLaMA-1.1B Draft with LLaMA-2-7B-32K Target, (b) LLaMA-2-7B-32K with Self-Speculation, (c) LLaMA-3.1-8B with Self-Speculation.
             </figcaption>
           </div>
 
@@ -282,7 +282,7 @@
               border-bottom: 2px solid black;
             }
             tr:nth-child(3) td, 
-            tr:nth-child(5) td {
+            tr:nth-child(6) td {
               border-bottom: 2px solid black;
             }
           </style>
@@ -303,49 +303,65 @@
               <td>Llama3.1-8B</td>
               <td>Selfspec</td>
               <td>32000</td>
-              <td>16</td>
-              <td>2</td>
-              <td>1.24</td>
+              <td>32</td>
+              <td>3</td>
+              <td>1.23</td>
             </tr>
             <tr>
               <td>Llama3.1-8B</td>
               <td>Selfspec</td>
               <td>32000</td>
+              <td>64</td>
+              <td>3</td>
+              <td>1.43</td>
+            </tr>
+            <tr>
+              <td>Llama2-7B</td>
+              <td>Selfspec</td>
+              <td>8000</td>
               <td>32</td>
               <td>3</td>
+              <td>1.19</td>
+            </tr>
+            <tr>
+              <td>Llama2-7B</td>
+              <td>Selfspec</td>
+              <td>8000</td>
+              <td>64</td>
+              <td>4</td>
               <td>1.42</td>
             </tr>
             <tr>
               <td>Llama2-7B</td>
               <td>Selfspec</td>
               <td>8000</td>
-              <td>32</td>
-              <td>3</td>
-              <td>1.44</td>
-            </tr>
-            <tr>
-              <td>Llama2-7B</td>
-              <td>Selfspec</td>
-              <td>8000</td>
-              <td>64</td>
+              <td>128</td>
               <td>4</td>
-              <td>1.68</td>
+              <td>1.65</td>
             </tr>
             <tr>
               <td>Llama2-7B</td>
               <td>Tinyllama1.1B</td>
               <td>8000</td>
               <td>32</td>
-              <td>3</td>
-              <td>1.60</td>
+              <td>2</td>
+              <td>1.32</td>
             </tr>
             <tr>
               <td>Llama2-7B</td>
               <td>Tinyllama1.1B</td>
               <td>8000</td>
               <td>64</td>
-              <td>4</td>
-              <td>1.84</td>
+              <td>3</td>
+              <td>1.48</td>
+            </tr>
+            <tr>
+              <td>Llama2-7B</td>
+              <td>Tinyllama1.1B</td>
+              <td>8000</td>
+              <td>64</td>
+              <td>3</td>
+              <td>1.64</td>
             </tr>
           </table>      
           <br>
@@ -601,7 +617,7 @@
                 <img src="static/images/arithmetic_intensity.png" alt="Arithmetic Intensity" style="height: 400px; width: 400px; margin: 0 10px;" />
               </div>
               <figcaption style="margin-top: 10px; text-align: center;">
-                <strong>Figure 2: (a) KV, weights, activations, and compute times for different batch sizes </strong>(Self Speculation LLaMA-2-7B, Prefill length 4000) on the left
+                <strong>Figure 2: (a) KV loading, weights loading, activations loading, and compute times for different batch sizes </strong>(Self Speculation LLaMA-2-7B, Prefill length 4000) on the left
                 <br> 
                 <strong>(b) Theoretical Arithmetic Intensity vs prefill length for different kinds of GPUs</strong>
                 (LLaMA-2-7B and LLaMA-3.1-8B models, Batch Size 256) on the right
