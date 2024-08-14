@@ -386,7 +386,8 @@
             <p>
               As context length increases, the KV cache loading becomes the primary bottleneck, scaling linearly with batch size (<a href="#figure-2">Figure 2-a</a>). Beyond a critical sequence length that is specific to the model type and hardware specifications, the KV loading time overtakes computation time as the dominant factor (<a href="#figure-2">Figure 2</a>). This transition increases speculative decoding's efficacy in two ways - 
               <ol>
-                <li>Verification to autoregressive time ratio stays close to 1 even for large batches. Hence, even if some speculated tokens are rejected, the time penalty of verifying rejected tokens is relatively low. Besides, verification ensures generation of atleast one token every iteration.</li>
+                <li>Verification to autoregressive time ratio stays close to 1 even for large batches. Hence, even if some speculated tokens are rejected, the time penalty of verifying rejected tokens is relatively low. 
+                  <!-- Besides, verification ensures generation of atleast one token every iteration.</li> -->
                 <!-- <li>Our choice of speculation with StreamingLLM draft becomes increasingly useful, given the draft token acceptance rate is relatively unaffected with increasing sequence length.</li> -->
                  <li>
                   Our choice of speculation with StreamingLLM draft becomes increasingly useful as KV scales with sequence length but the draft token acceptance rate is relatively unaffected.
@@ -421,7 +422,9 @@
                   <!-- A ratio close to 1 is ideal. While this holds true for smaller batch sizes, verification becomes expensive for small sequences as batch size grows. However, for sufficiently long sequences, as inference becomes memory-bound, the verification-to-target ratio approaches 1 again with increasing batch size. -->
                   A low verification to target cost ratio is ideal for speculative decoding. While this ratio remains close to 1 for smaller batch sizes, verification becomes costly for small sequences as batch size grows.
                 
-                  For small batch sizes and moderately long sequences, the model loading time is the main bottleneck which gets amortized by parallel verification of speculated tokens. However, with increasing batch size, LLM becomes more compute-bound, and the verification-to-target ratio increases. 
+                  For small batch sizes, 
+                  <!-- and moderately long sequences, -->
+                the model loading time is the main bottleneck which gets amortized by parallel verification of speculated tokens. However, with increasing batch size, LLM becomes more compute-bound, and the verification-to-target ratio increases. 
                   
                   Consequently, the target model spends more time verifying speculated tokens that are ultimately rejected, wasting compute resources. However, for sufficiently long sequences, as bottleneck shifts to KV-loading, the verification-to-target ratio stays close to 1 even for large batches. 
                   
