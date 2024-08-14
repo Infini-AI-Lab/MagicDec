@@ -267,7 +267,9 @@
           <style>
             table {
               border-collapse: collapse;
-              width: 100%;
+              width: 80%;
+              margin-left: auto;
+              margin-right: auto;
             }
             th, td {
               text-align: left;
@@ -287,7 +289,7 @@
           
           <table>
             <caption style="caption-side: top; text-align: center; font-weight: bold; margin-bottom: 10px;">
-              End-to-end Speculative Decoding Speedups for Various Target-Draft pairs on H100
+              End-to-end Speculative Decoding Speedups for Various Target-Draft pairs on 8xH100s
             </caption>
             <tr>
               <th>Target</th>
@@ -376,7 +378,199 @@
           </h2>
           <div class="content has-text-justified">
             <p>
-              Speculative decoding leverages underutilized GPU compute during memory-bound autoregressive decoding. However, <a href="https://arxiv.org/pdf/2406.14066" rel="external nofollow noopener" target="_blank" style="color: #209CEE;">prior research</a> has shown that speculative decoding becomes less effective as batch sizes increase and exhaust the available compute. These challenges have led to speculative decoding being underutilized in processing large batches. However, we show that for long sequences, a shift in LLM operation bottleneck allows speculative decoding to become more effective with larger batch sizes. 
+              Speculative decoding leverages underutilized GPU compute during memory-bound autoregressive decoding. However, <a href="https://arxiv.org/pdf/2406.14066" rel="external nofollow noopener" target="_blank" style="color: #209CEE;">prior research</a> has shown that speculative decoding becomes less effective as batch sizes increase and exhaust the available compute. These challenges have led to speculative decoding being avoided in processing large batches. However, we show that for long sequences, a shift in LLM operation bottleneck allows speculative decoding to become more effective with larger batch sizes. 
+            </p>
+
+            <h4 class="title is-5">
+              <img src="static/images/icons/Switch.png" style="height: 36px; display: inline; vertical-align: middle;"/>
+              &nbsp; Mathematical Formulation for Speedup Breakdown 
+            </h4>
+            <p>Given a speculation length γ for a sequence of length S and batch size B, let T<sub>T</sub>(B, S, 1) and T<sub>D</sub>(B, S, 1) denote the times taken by the target and draft models to decode one token, respectively. The verification time, T<sub>V</sub>(B, S, γ), is the time it takes the target model to verify the γ tokens speculated by the draft model in a single forward pass. Given an acceptance rate α ∈ [0, 1] and speculation length γ, Ω(γ, α) represents the expected number of tokens generated in one verification step, described as,</p>
+
+            <div style="text-align: center;">
+              <math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
+                <mrow>
+                  <mi>Ω</mi>
+                  <mo stretchy="false">(</mo>
+                  <mi>γ</mi>
+                  <mo>,</mo>
+                  <mi>α</mi>
+                  <mo stretchy="false">)</mo>
+                  <mo>:=</mo>
+                  <mi>𝔼</mi>
+                  <mo>[</mo>
+                  <mo>#</mo>
+                  <mtext> generated tokens</mtext>
+                  <mo>]</mo>
+                  <mo>=</mo>
+                  <mfrac>
+                    <mrow>
+                      <mn>1</mn>
+                      <mo>-</mo>
+                      <msup>
+                        <mi>α</mi>
+                        <mrow>
+                          <mi>γ</mi>
+                          <mo>+</mo>
+                          <mn>1</mn>
+                        </mrow>
+                      </msup>
+                    </mrow>
+                    <mrow>
+                      <mn>1</mn>
+                      <mo>-</mo>
+                      <mi>α</mi>
+                    </mrow>
+                  </mfrac>
+                </mrow>
+              </math>
+            </div>
+
+            <p>The total time taken for speculative decoding, T<sup>SD</sup><sub>Total</sub>, is given by:</p>
+
+            <div style="text-align: center;">
+              <math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
+                <mrow>
+                  <msubsup>
+                    <mi>T</mi>
+                    <mtext>Total</mtext>
+                    <mtext>SD</mtext>
+                  </msubsup>
+                  <mo>=</mo>
+                  <mi>γ</mi>
+                  <mo>⋅</mo>
+                  <msub>
+                    <mi>T</mi>
+                    <mi>D</mi>
+                  </msub>
+                  <mo stretchy="false">(</mo>
+                  <mi>B</mi>
+                  <mo>,</mo>
+                  <mi>S</mi>
+                  <mo>,</mo>
+                  <mn>1</mn>
+                  <mo stretchy="false">)</mo>
+                  <mo>+</mo>
+                  <msub>
+                    <mi>T</mi>
+                    <mi>V</mi>
+                  </msub>
+                  <mo stretchy="false">(</mo>
+                  <mi>B</mi>
+                  <mo>,</mo>
+                  <mi>S</mi>
+                  <mo>,</mo>
+                  <mi>γ</mi>
+                  <mo stretchy="false">)</mo>
+                </mrow>
+              </math>
+            </div>
+
+            <p>The per-token latency for speculative decoding is simply:</p>
+
+            <div style="text-align: center;">
+              <math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
+                <mrow>
+                  <msubsup>
+                    <mi>T</mi>
+                    <mtext>Avg</mtext>
+                    <mtext>SD</mtext>
+                  </msubsup>
+                  <mo>=</mo>
+                  <mfrac>
+                    <msubsup>
+                      <mi>T</mi>
+                      <mtext>Total</mtext>
+                      <mtext>SD</mtext>
+                    </msubsup>
+                    <mrow>
+                      <mi>Ω</mi>
+                      <mo>(</mo>
+                      <mi>γ</mi>
+                      <mo>,</mo>
+                      <mi>α</mi>
+                      <mo>)</mo>
+                    </mrow>
+                  </mfrac>
+                </mrow>
+              </math>
+            </div>
+
+            <p>If we take a ratio of the latency of speculative decoding and regular autoregressive decoding, we can break down the ratio as following,</p>
+
+            <div style="text-align: center;">
+              <math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
+                  <mrow>
+                      <mfrac>
+                          <mrow>
+                              <msubsup>
+                                  <mi>T</mi>
+                                  <mtext>Avg</mtext>
+                                  <mtext>SD</mtext>
+                              </msubsup>
+                          </mrow>
+                          <mrow>
+                              <msub>
+                                  <mi>T</mi>
+                                  <mi>T</mi>
+                              </msub>
+                          </mrow>
+                      </mfrac>
+                      <mo>=</mo>
+                      <mfrac>
+                          <mn>1</mn>
+                          <mrow>
+                              <mi>Ω</mi>
+                              <mo stretchy="true">(</mo>
+                              <mi>γ</mi>
+                              <mo>,</mo>
+                              <mi>α</mi>
+                              <mo stretchy="true">)</mo>
+                          </mrow>
+                      </mfrac>
+                      <mo stretchy="true">(</mo>
+                      <mfrac>
+                          <mrow>
+                              <mi>γ</mi>
+                              <mo>⋅</mo>
+                              <msub>
+                                  <mi>T</mi>
+                                  <mi>D</mi>
+                              </msub>
+                          </mrow>
+                          <msub>
+                              <mi>T</mi>
+                              <mi>T</mi>
+                          </msub>
+                      </mfrac>
+                      <mo>+</mo>
+                      <mfrac>
+                          <mrow>
+                              <msub>
+                                  <mi>T</mi>
+                                  <mi>V</mi>
+                              </msub>
+                              <mo stretchy="true">(</mo>
+                              <mi>γ</mi>
+                              <mo stretchy="true">)</mo>
+                          </mrow>
+                          <msub>
+                              <mi>T</mi>
+                              <mi>T</mi>
+                          </msub>
+                      </mfrac>
+                      <mo stretchy="true">)</mo>
+                  </mrow>
+              </math>
+            </div>
+            
+            <p>From this mathematical formulation, we can note that:
+              <ol>
+                <li>Ideally T<sub>D</sub> / T<sub>T</sub> should be close to 0. We shall show how this ratio changes with batch size for different sequence lengths.</li>
+                <li>Ideally T<sub>V</sub> / T<sub>T</sub> ratio should be close to 1. We shall how this ratio stays close to 1 for moderate to long sequences even in high batch size regime.</li>
+                <li>Ω(γ, α) should ideally be high. Although this quantity is not expected to change with batch size because of the i.i.d assumption for the batched sequences.</li>
+              </ol>
+              However, to understand the trends of these individual quantities, we need to understand how the bottleneck of the LLM operation changes with batch size and sequence length.
             </p>
             
             <h4 class="title is-5">
