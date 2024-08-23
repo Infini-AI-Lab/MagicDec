@@ -24,7 +24,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 showLine: true
             },
             {
-                label: '(SpecDec) Prefill 8000',
+                label: '(SD) Prefill 8000',
                 data: [
                     {x: 12.83, y: 2493},
                     {x: 15.26, y: 3146},
@@ -70,6 +70,10 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     new Chart(ctx1, config1);
+    // add a acpation below
+    const caption1 = document.createElement('p');
+    caption1.innerHTML = 'Figure 1-a: Max Throughput vs. Avg. Tokenwise Latency Budget for 8k context len with SD and AutoReg';
+    document.getElementById('chart1').parentNode.appendChild(caption1);
 
     // Second chart
     const ctx2 = document.getElementById('chart2').getContext('2d');
@@ -159,7 +163,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 type: 'linear',
                 title: {
                     display: true,
-                    text: 'Throughput Ratio (SpecDec/AutoReg)'
+                    text: 'Throughput Ratio (SD/AutoReg)'
                 }
             },
             x: {
@@ -180,4 +184,8 @@ document.addEventListener('DOMContentLoaded', function() {
     };
 
     new Chart(ctx2, config2);
+    // add a caption below
+    const caption2 = document.createElement('p');
+    caption2.innerHTML = 'Figure 1-b: Throughput Ratio (SD/AutoReg) vs. Avg. Tokenwise Latency Budget for Different Prefill Sizes';
+    document.getElementById('chart2').parentNode.appendChild(caption2);
 });

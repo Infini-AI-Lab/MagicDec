@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="100" height="100">
+  <!-- Light Bulb -->
+  <g id="lightbulb">
+    <path d="M50 10c-12.15 0-22 9.85-22 22 0 8.49 4.72 15.88 11.72 19.79V64a4 4 0 004 4h12a4 4 0 004-4v-12.21C67.28 47.88 72 40.49 72 32c0-12.15-9.85-22-22-22zm0 56a2 2 0 01-2-2v-6h4v6a2 2 0 01-2 2zm6-44a6 6 0 01-6 6h-4a6 6 0 010-12h4a6 6 0 016 6z" fill="#FFD700"/>
+  </g>
+
+  <!-- Upper Circular Arrow -->
+  <g id="upper-arrow" fill="none" stroke="#007BFF" stroke-width="4">
+    <path d="M50 6a38 38 0 0132.28 19.28" />
+    <path d="M82 14l-8 8 12 4z"/>
+  </g>
+
+  <!-- Lower Circular Arrow -->
+  <g id="lower-arrow" fill="none" stroke="#007BFF" stroke-width="4">
+    <path d="M50 94a38 38 0 01-32.28-19.28"/>
+    <path d="M18 86l8-8-12-4z"/>
+  </g>
+</svg>

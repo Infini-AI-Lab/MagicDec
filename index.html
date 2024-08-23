@@ -118,7 +118,7 @@
               <span class="author-block"><a href="https://dreaming-panda.github.io/" target="_blank">Zhuoming Chen</a><sup>1</sup>,</span>
               <br>
               <span class="author-block"><a href="" target="_blank">Jinyuan Shi</a><sup>2</sup></span>
-              <span class="author-block"><a href="" target="_blank">Ian Yan</a><sup>2</sup>,</span>
+              <span class="author-block"><a href="" target="_blank">Ian En-Hsu Yen</a><sup>2</sup>,</span>
               <span class="author-block"><a href="https://www.andrew.cmu.edu/user/beidic/" target="_blank">Beidi Chen</a><sup>1,3</sup></span>
             </div>
             
@@ -137,7 +137,7 @@
             
             <div class="column has-text-centered">
               <span class="link-block">
-                <a href="" target="_blank" class="external-link button is-normal is-rounded is-dark">
+                <a href="https://arxiv.org/abs/2408.11049" target="_blank" class="external-link button is-normal is-rounded is-dark">
                   <span class="icon"><i class="ai ai-arxiv"></i></span>
                   <span>arXiv</span>
                 </a>
@@ -150,18 +150,33 @@
                 </a>
               </span>
               
-              <span class="link-block">
-                <a href="" target="_blank" class="external-link button is-normal is-rounded is-dark">
+              <!-- <span class="link-block">
+                <a href="https://youtu.be/vRAaAyjr6Jo" target="_blank" class="external-link button is-normal is-rounded is-dark">
                   <span class="icon"><i class="fab fa-youtube"></i></span>
                   <span>Video</span>
                 </a>
-              </span>
+              </span> -->
             </div>
           </div>
         </div>
       </div>
     </div>
   </section>
+
+<!-- Section: Paper abstract -->
+<section class="section hero is-light">
+  <div class="container is-fluid">
+    <div class="columns is-centered">
+      <div class="column is-four-fifths">
+          <div class="content has-text-justified">
+            <p>
+              <strong style="font-weight: 900;color: #0f598a">TL;DR:</strong> We introduce <strong>MagicDec</strong>, which uses Speculative Decoding to improve both throughput and latency of LLM inference. Our work identifies the bottleneck shifts with increasing batch size and sequence length, and uses these insights to deploy Speculative Decoding more effectively for high throughput inference. It challenges the existing wisdom regarding the inefficacy of Speculative Decoding for large batch sizes. More interestingly, we observe an <strong>improvement in speedup with increasing batch size</strong> for moderate to long sequences. Our work theoretically motivates and empirically validates why Speculative Decoding is a potential solution for breaking throughput-latency tradeoff, when used wisely. 
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+</section>
 
 
 <!-- Section: Paper abstract -->
@@ -175,213 +190,72 @@
           </h2>
           <div class="content has-text-justified">
             <p>
-                As Large Language Models (LLMs) become more prevalent in applications like interactive chatbots, efficiently serving long context requests has gained significant attention. However, balancing throughput and latency when serving long-context requests remains a challenge, with improvements in one often leading to drawbacks in the other. Our method <b>MagicDec</b> uses speculative decoding to handle this issue for large batches of long sequences without sacrificing output quality. We provide empirical observations and theoretical motivation for a critical sequence length beyond which speculative decoding becomes increasingly beneficial for larger batch sizes. This finding highlights an extensive scope of MagicDec in long context serving. For moderate to long sequences, we demonstrate upto <b>2x speedup for Llama2-7B-32K and 1.84x speedup for Llama3.1-8B</b>, when serving batch sizes ranging from 32 to 256 on 8 NVIDIA A100 GPUs. 
-                <!-- <a style="color: #209CEE" href="https://arxiv.org/abs/2404.11912" target="_blank">paper</a>. -->
+              With an emergence of long-context models and a growing popularity of applications like interactive chat-bots, efficiently serving long context requests has gained significant attention. Concurrently, for commercial use-cases, high-throughput serving directly translates to increased revenue. However, achieving both low latency and high throughput poses a challenge as the two are often at odds with each other. While Speculative Decoding techniques have been proposed to improve latency at the cost of throughput, different continuous batching techniques have prioritized throughput over latency. Quantization and pruning based methods can achieve both high throughput and latency, but often sacrifice performance. Given these trade-offs, we pose the following question:
+              
+              <blockquote>
+                <strong>Can we achieve high throughput and low latency for long-context LLM generation without sacrificing performance?</strong>
+              </blockquote>
+
+            </p>
+              
+            <p>
+              To answer this question, we revisit the efficacies of Speculative Decoding through an analytical approach. Existing works (e.g., <a style="color: #209CEE" href="https://arxiv.org/abs/2406.14066">Liu et al, 2024</a>; <a style="color: #209CEE" href="https://arxiv.org/abs/2310.18813">Su et al, 2023</a>) have claimed that although useful for small batch sizes, Speculative Decoding can become counter-productive for serving large batches. This inefficiency stems from two primary factors:  
+              <ol>
+                <li>For small batch sizes, Speculative Decoding tries to use the underutilized compute resources through parallel verification of speculated tokens, but for large batch sizes, the compute resources are already well-utilized, diminishing the potential benefits.</li>
+                <li>If the draft model is not capable enough, the low acceptance rate can cause the target model to spend more time verifying tokens that are ultimately rejected.</li>
+              </ol>
+            </p>
+            
+            <h3 class="title is-size-5" style="text-align: left;">
+              <img src="static/images/icons/revisit.png" style="height: 36px; display: inline; vertical-align: middle;"/>
+              &nbsp; Revisiting Speculative Decoding for High Throughput
+            </h3>
+            <p>
+              In this blogpost, we look into these claims more carefully and try to find way-arounds. With suitable drafting strategies, 
+              <ol>
+                <strong>
+                  <li>We are able to find speedup in the high throughput regime 😎</li>
+                  <li>Furthermore, we can achieve increased speedup with increasing batch size, meaning higher throughput at higher latency budget 🤩</li>
+                </strong>
+              </ol>
+              beyond a critical sequence length dependent on model type and hardware specifications. The higher is the context length, the better is the improvement in throughput. </p>
+              <div style="display: flex; flex-wrap: wrap; justify-content: center;">
+                <div style="width: 45%; min-width: 150px; margin: 5px;">
+                    <canvas id="chart1"></canvas>
+                </div>
+                <div style="width: 45%; min-width: 150px; margin: 5px;">
+                    <canvas id="chart2"></canvas>
+                </div>
+              </div>
+              <script src="static/js/plots/throughput_latency_smaller.js"></script>
+              <br>
+            <p>
+              <!-- We note that our sparse KV cache based drafting is absolutely key in high batch size and sequence length regime. To retain a high acceptance rate even for longer contexts, we rely on a simple but effective KV sparsification strategy called <a style="color: #209CEE" href="https://arxiv.org/abs/2309.17453">StreamingLLM</a>. -->
+
+              The key observation is that, for every model and hardware pair, there exists a <i>critical sequence length</i> beyond which LLM inference becomes memory bound even for large batch sizes. This is because, for long enough sequences, the KV cache becomes the primary memory bottleneck and unlike model parameters, it scales with batch size. Although computation time also increases linearly with batch size, the increase in KV loading time dominates. We use this insight to -
+              <ol><strong>
+                <li>Design a draft model with <a style="color: #209CEE">sparse KV cache</a>.</li>
+                <li>Exploit the low verification to autoregressive decoding latency ratio even at large batch sizes.</li>
+              </strong>
+              </ol> 
+            </p>
+
+            <p>
+              KV sparsification for drafting is absolutely important because otherwise, in a high batch size and sequence length regime, the draft to target cost ratio will be decided by the draft to target memory footprint ratio only. For example, when we speculate Llama-3.1-70B model with a Llama-3.1-8B draft, the draft to target memory loading ratio goes up to 0.4 and stays constant at larger batch sizes, as can be seen in <a style="color: #0b3c5d" href="#figure-4">Figure 4</a>. However, with a fixed KV budget for the draft model, draft latency increases very slowly with batch size. Consequently, the draft to target cost ratio keeps on decreasing for larger batches, resulting in a higher speed-up.
+            </p>
+
+            <p>
+              The fixed draft KV budget naturally raises concern about the acceptance rate, which is another important deciding factor. Fortunately, StreamingLLM with a small KV budget like 512 is able to retain a high acceptance rate even for sequences as long as 100K! To further improve the acceptance rate, we can increase the drafting budget in different ways as long as the draft to target cost ratio remains reasonably small. Contrary to existing beliefs (e.g., <a style="color: #209CEE" href="https://arxiv.org/abs/2406.14066">Liu et al, 2024</a>; <a style="color: #209CEE" href="https://arxiv.org/abs/2310.18813">Su et al, 2023</a>), this high acceptance rate allows us to use longer speculation length for larger batches. And thus, as you guessed, we can keep on getting better speedup with increasing batch size 💪.
+              <br>
+              <br>
+              Seems like Magic? Well, let's get into the details of MagicDec! 🧙‍♂️   
+              <!-- <a style="color: #209CEE" href="https://arxiv.org/abs/2404.11912" target="_blank">paper</a>. -->
             </p>
           </div>
         </div>
       </div>
     </div>
 </section>
-
-<!-- Section: Paper abstract -->
-<section class="section hero is-light">
-  <div class="container is-fluid">
-    <div class="columns is-centered">
-      <div class="column is-four-fifths">
-          <h2 class="title is-3" style="text-align: center;">
-            <img src="static/images/icons/timepassing.png" style="height: 50px; display: inline; vertical-align: middle;"/>
-            &nbsp; MagicDec: Improvements for Large Batches and Long Sequences
-          </h2>
-          <div class="content has-text-justified">
-            <p>
-              To demonstrate improvements in speedups with increasing batch size, we evaluated two types of draft models: (1)
-              Standalone draft model with GQA (<a style="color: #209CEE" href="https://huggingface.co/TinyLlama/TinyLlama-1.1B-intermediate-step-1431k-3T">TinyLLaMA-1.1B</a> to speculate <a style="color: #209CEE" href="https://huggingface.co/togethercomputer/LLaMA-2-7B-32K">LLaMA-2-7B-32K</a>) and (2)
-              Self-Speculation for Llama-2-7B-32k and and <a style="color: #209CEE" href="https://huggingface.co/meta-llama/Meta-Llama-3.1-8B">Llama-3.1-8B</a>. In both cases, we utilize StreamingLLM in
-              drafting to address the KV bottleneck. The performance was evaluated on A100, H100, and L40 devices on <a style="color: #209CEE" href="https://huggingface.co/datasets/emozilla/pg19-test">PG-19</a> dataset.
-            </p>
-            <h6>Key observations:</h6>
-            <!-- <ol style="font-size: 0.9em;">
-              <li>Speculative Decoding is effective in improving throughput for long enough sequences.</li>
-              <li>For every model and hardware pair, there exists a critical sequence length, beyond which
-                  speedup increases with increasing batch size—the longer the sequence, the better the
-                  speedup scaling.</li>
-              <li>For moderate to long sequences, optimal speculation length also increases with batch
-                  size.</li>
-            </ol> -->
-             <!-- <p><strong>1. Speculative Decoding achieves better throughput-latency trade-off for moderate to long sequences.</strong></p> -->
-             <!-- <div style="display: flex; flex-wrap: wrap; justify-content: center;">
-              <div style="width: 120%; min-width: 300px; margin: 5px;">
-                  <canvas id="chart1"></canvas>
-              </div>
-              <div style="width: 120%; min-width: 300px; margin: 5px;">
-                  <canvas id="chart2"></canvas>
-              </div>
-            </div>
-             <script src="static/js/plots/throughput_latency.js"></script> -->
-             <!-- <ol style="font-size: 0.9em;">
-              <li>Speculative Decoding is effective in improving throughput for long enough sequences.</li>
-              <li>For every model and hardware pair, there exists a critical sequence length, beyond which
-                  speedup increases with increasing batch size—the longer the sequence, the better the
-                  speedup scaling.</li>
-              <li>For moderate to long sequences, optimal speculation length also increases with batch
-                  size.</li>
-            </ol> -->
-            <p><strong>1. Speculative Decoding achieves better throughput-latency trade-off for moderate to long sequences.</strong></p>
-            <!-- <div style="display: flex; flex-wrap: wrap; justify-content: center;">
-            <div style="width: 60%; min-width: 250px; margin: 5px;">
-                <canvas id="chart1"></canvas>
-            </div>
-            <div style="width: 60%; min-width: 250px; margin: 5px;">
-                <canvas id="chart2"></canvas>
-            </div>
-          </div>
-            <script src="static/js/plots/throughput_latency_smaller.js"></script>
-          
-             -->
-             <div style="display: flex; flex-wrap: wrap; justify-content: center;">
-              <div style="width: 45%; min-width: 150px; margin: 5px;">
-                  <canvas id="chart1"></canvas>
-              </div>
-              <div style="width: 45%; min-width: 150px; margin: 5px;">
-                  <canvas id="chart2"></canvas>
-              </div>
-          </div>
-          <script src="static/js/plots/throughput_latency_smaller.js"></script>
-          
-             <p><strong>2. For every model and hardware pair, there exists a critical sequence length, beyond which speedup increases with increasing batch size—the longer the sequence, the better the speedup scaling.</strong></p>
-             <p><strong>3. Interestingly, the optimal speculation length also increases with batch size for sufficiently long sequences.</strong></p>
-          </div>
-          <br>
-          <div id="figure-1" class="image-container">
-            <img src="static/images/speedups_budget512.png" alt="Results" height="350" />
-            <figcaption style="font-size: 0.9em;">
-              <!-- <strong>Figure 1: End-to-end Speculative Decoding Speedups for Various Target-Draft pairs on 8 NVIDIA A100s.</strong> -->
-              <strong>  
-                Figure 1: End-to-end Speculative Decoding Speedups (with optimal speculation length) on 8 NVIDIA A100s. </strong> (a) TinyLLaMA-1.1B Draft with LLaMA-2-7B-32K Target, (b) LLaMA-2-7B-32K with Self-Speculation, (c) LLaMA-3.1-8B with Self-Speculation.
-            </figcaption>
-          </div>
-
-          <br>
-          <br>
-          <style>
-            table {
-              border-collapse: collapse;
-              width: 80%;
-              margin-left: auto;
-              margin-right: auto;
-            }
-            th, td {
-              text-align: left;
-              padding: 12px;
-            }
-            tr td {
-              border-bottom: 1px solid black;
-            }
-            th {
-              border-bottom: 2px solid black;
-            }
-            tr:nth-child(3) td, 
-            tr:nth-child(6) td {
-              border-bottom: 2px solid black;
-            }
-          </style>
-          
-          <table>
-            <caption style="caption-side: top; text-align: center; font-weight: bold; margin-bottom: 10px;">
-              End-to-end Speculative Decoding Speedups for Various Target-Draft pairs on 8xH100s
-            </caption>
-            <tr>
-              <th>Target</th>
-              <th>Draft</th>
-              <th>Prefill</th>
-              <th>Batch Size</th>
-              <th>Optimal Spec Len</th>
-              <th>Speedup</th>
-            </tr>
-            <tr>
-              <td>Llama3.1-8B</td>
-              <td>Selfspec</td>
-              <td>32000</td>
-              <td>32</td>
-              <td>3</td>
-              <td>1.23</td>
-            </tr>
-            <tr>
-              <td>Llama3.1-8B</td>
-              <td>Selfspec</td>
-              <td>32000</td>
-              <td>64</td>
-              <td>3</td>
-              <td>1.43</td>
-            </tr>
-            <tr>
-              <td>Llama2-7B</td>
-              <td>Selfspec</td>
-              <td>8000</td>
-              <td>32</td>
-              <td>3</td>
-              <td>1.19</td>
-            </tr>
-            <tr>
-              <td>Llama2-7B</td>
-              <td>Selfspec</td>
-              <td>8000</td>
-              <td>64</td>
-              <td>4</td>
-              <td>1.42</td>
-            </tr>
-            <tr>
-              <td>Llama2-7B</td>
-              <td>Selfspec</td>
-              <td>8000</td>
-              <td>128</td>
-              <td>4</td>
-              <td>1.65</td>
-            </tr>
-            <tr>
-              <td>Llama2-7B</td>
-              <td>Tinyllama1.1B</td>
-              <td>8000</td>
-              <td>32</td>
-              <td>2</td>
-              <td>1.32</td>
-            </tr>
-            <tr>
-              <td>Llama2-7B</td>
-              <td>Tinyllama1.1B</td>
-              <td>8000</td>
-              <td>64</td>
-              <td>3</td>
-              <td>1.48</td>
-            </tr>
-            <tr>
-              <td>Llama2-7B</td>
-              <td>Tinyllama1.1B</td>
-              <td>8000</td>
-              <td>64</td>
-              <td>3</td>
-              <td>1.64</td>
-            </tr>
-          </table>      
-          <br>
-          <!-- <h4 class="title is-5">
-            <img src="static/images/icons/demo.png" style="height: 36px; display: inline; vertical-align: middle;"/>
-            &nbsp; Summarize a Book of 127K Tokens
-          </h4>
-          <p>
-            Here we present a demo for LWM-Text-Chat-128K inference on two RTX 4090s with 127K contexts (with and without TriForce). We prefill the model with 127K tokens from a book in NarrativeQA, directing the model to summarize the book's content. The video is displayed at normal speed (1x).
-          </p>
-          <div class="item item-video1">
-            <video poster="" id="video1" autoplay controls muted height="100%">
-              <source src="static/videos/TriForce.mp4" type="video/mp4">
-            </video>
-          </div> -->
-        </div>
-      </div>
-    </div>
-  </section>
-
 
 <!-- Section: Motivation -->
 <section class="section hero is-light">
@@ -393,15 +267,15 @@
             &nbsp; Motivation
           </h2>
           <div class="content has-text-justified">
-            <p>
-              Speculative decoding leverages underutilized GPU compute during memory-bound autoregressive decoding. However, <a href="https://arxiv.org/pdf/2406.14066" rel="external nofollow noopener" target="_blank" style="color: #209CEE;">prior research</a> has shown that speculative decoding becomes less effective as batch sizes increase and exhaust the available compute. These challenges have led to speculative decoding being avoided in processing large batches. However, we show that for long sequences, a shift in LLM operation bottleneck allows speculative decoding to become more effective with larger batch sizes. 
-            </p>
+            <!-- <p>
+              Speculative decoding leverages underutilized GPU compute during memory-bound autoregressive decoding. However, <a href="https://arxiv.org/pdf/2406.14066" rel="external nofollow noopener" target="_blank" style="color: #209CEE;">prior research</a> has shown that Speculative Decoding becomes less effective as batch sizes increase and exhaust the available compute. These challenges have led to Speculative Decoding being avoided in processing large batches. However, we show that for long sequences, a shift in LLM operation bottleneck allows Speculative Decoding to become more effective with larger batch sizes. 
+            </p> -->
 
             <h4 class="title is-5">
               <img src="static/images/icons/MathematicsCompass.png" style="height: 36px; display: inline; vertical-align: middle;"/>
               &nbsp;Analytical Breakdown of Speedup in Speculative Decoding 
             </h4>
-            <p>Given a speculation length γ for a sequence of length S and batch size B, let T<sub>T</sub>(B, S, 1) and T<sub>D</sub>(B, S, 1) denote the times taken by the target and draft models to decode one token, respectively. The verification time, T<sub>V</sub>(B, S, γ), is the time it takes the target model to verify the γ tokens speculated by the draft model in a single forward pass. Given an acceptance rate α ∈ [0, 1] and speculation length γ, Ω(γ, α) represents the expected number of tokens generated in one verification step, described as:</p>
+            <p>Given a speculation length γ for a sequence of length S and batch size B, let T<sub>T</sub>(B, S, 1) and T<sub>D</sub>(B, S, 1) denote the target and draft decoding latencies, respectively. The verification time, T<sub>V</sub>(B, S, γ), is the time it takes the target model to verify the γ speculated tokens in a single forward pass. Given an acceptance rate α ∈ [0, 1] and speculation length γ, Ω(γ, α) represents the expected number of tokens generated in one verification step, as described by <a style="color: #209CEE" href="https://arxiv.org/abs/2211.17192">Leviathan et al.</a>:</p>
             
 
             <div style="text-align: center;">
@@ -443,7 +317,7 @@
               </math>
             </div>
 
-            <p>The total time taken for speculative decoding, T<sup>SD</sup><sub>Total</sub>, is given by:</p>
+            <p>The total time taken for Speculative Decoding, T<sup>SD</sup><sub>Total</sub>, is given by:</p>
 
             <div style="text-align: center;">
               <math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
@@ -483,7 +357,7 @@
               </math>
             </div>
 
-            <p>The per-token latency for speculative decoding is simply:</p>
+            <p>The expected per-token latency for Speculative Decoding is simply:</p>
 
             <div style="text-align: center;">
               <math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
@@ -513,82 +387,77 @@
               </math>
             </div>
 
-            <p>If we take a ratio of the latency of speculative decoding and regular autoregressive decoding, we can break down the ratio as following:</p>
+            <p>The ratio of Speculative Decoding latency to regular autoregressive decoding latency can be broken down as:</p>
 
-            <div style="text-align: center;">
-                <math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
-                    <mrow>
-                        <mfrac>
-                            <mrow>
-                                <msubsup>
-                                    <mi>T</mi>
-                                    <mtext>Avg</mtext>
-                                    <mtext>SD</mtext>
-                                </msubsup>
-                            </mrow>
-                            <mrow>
-                                <msub>
-                                    <mi>T</mi>
-                                    <mi>T</mi>
-                                </msub>
-                            </mrow>
-                        </mfrac>
-                        <mo>=</mo>
-                        <mfrac>
-                            <mn>1</mn>
-                            <mrow>
-                                <mi>Ω</mi>
-                                <mo stretchy="true">(</mo>
-                                <mi>γ</mi>
-                                <mo>,</mo>
-                                <mi>α</mi>
-                                <mo stretchy="true">)</mo>
-                            </mrow>
-                        </mfrac>
-                        <mo stretchy="true">(</mo>
-                        <mfrac>
-                            <mrow>
-                                <mi>γ</mi>
-                                <mo>⋅</mo>
-                                <msub>
-                                    <mi>T</mi>
-                                    <mi>D</mi>
-                                </msub>
-                            </mrow>
-                            <msub>
-                                <mi>T</mi>
-                                <mi>T</mi>
-                            </msub>
-                        </mfrac>
-                        <mo>+</mo>
-                        <mfrac>
-                            <mrow>
-                                <msub>
-                                    <mi>T</mi>
-                                    <mi>V</mi>
-                                </msub>
-                                <mo stretchy="true">(</mo>
-                                <mi>γ</mi>
-                                <mo stretchy="true">)</mo>
-                            </mrow>
-                            <msub>
-                                <mi>T</mi>
-                                <mi>T</mi>
-                            </msub>
-                        </mfrac>
-                        <mo stretchy="true">)</mo>
-                    </mrow>
-                </math>
-            </div>
-            
-            <p>From this mathematical formulation, we can note that:
-              <ol>
-                <li>Ideally T<sub>D</sub> / T<sub>T</sub> should be close to 0. We will show how this ratio changes with batch size for different sequence lengths.</li>
-                <li>Ideally T<sub>V</sub> / T<sub>T</sub> ratio should be close to 1. We will demonstrate how this ratio stays close to 1 for moderate to long sequences even in high batch size regime.</li>
-                <li>Ω(γ, α) should ideally be high. Although this quantity is not expected to change with batch size due to the i.i.d assumption for the batched sequences.</li>
-                
-              </ol>
-              To fully understand the trends of these individual quantities, we need to consider how the bottleneck of LLM operation changes with batch size and sequence length.
+            <div id="eq-1" style="text-align: center; position: relative;">
+              <math xmlns="http://www.w3.org/1998/Math/MathML" display="block">
+                  <mrow>
+                      <mfrac>
+                          <mrow>
+                              <msubsup>
+                                  <mi>T</mi>
+                                  <mtext>Avg</mtext>
+                                  <mtext>SD</mtext>
+                              </msubsup>
+                          </mrow>
+                          <mrow>
+                              <msub>
+                                  <mi>T</mi>
+                                  <mi>T</mi>
+                              </msub>
+                          </mrow>
+                      </mfrac>
+                      <mo>=</mo>
+                      <mfrac>
+                          <mn>1</mn>
+                          <mrow>
+                              <mi>Ω</mi>
+                              <mo stretchy="true">(</mo>
+                              <mi>γ</mi>
+                              <mo>,</mo>
+                              <mi>α</mi>
+                              <mo stretchy="true">)</mo>
+                          </mrow>
+                      </mfrac>
+                      <mo stretchy="true">(</mo>
+                      <mfrac>
+                          <mrow>
+                              <mi>γ</mi>
+                              <mo>⋅</mo>
+                              <msub>
+                                  <mi>T</mi>
+                                  <mi>D</mi>
+                              </msub>
+                          </mrow>
+                          <msub>
+                              <mi>T</mi>
+                              <mi>T</mi>
+                          </msub>
+                      </mfrac>
+                      <mo>+</mo>
+                      <mfrac>
+                          <mrow>
+                              <msub>
+                                  <mi>T</mi>
+                                  <mi>V</mi>
+                              </msub>
+                              <mo stretchy="true">(</mo>
+                              <mi>γ</mi>
+                              <mo stretchy="true">)</mo>
+                          </mrow>
+                          <msub>
+                              <mi>T</mi>
+                              <mi>T</mi>
+                          </msub>
+                      </mfrac>
+                      <mo stretchy="true">)</mo>
+                  </mrow>
+              </math>
+              <div style="position: absolute; right: 0; bottom: 0;">
+                  (1)
+              </div>
+            </div>      
+            <p>We shall come back to this equation shortly.    
             </p>
             
             <h4 class="title is-5">
@@ -596,34 +465,57 @@
               &nbsp; Shift in Bottleneck from Compute to Memory
             </h4>
             <p>
-              As context length increases, the KV cache loading becomes the primary bottleneck, scaling linearly with batch size (<a href="#figure-2">Figure 2-a</a>). Beyond a critical sequence length that is specific to the model type and hardware specifications, the KV loading time overtakes computation time as the dominant factor (<a href="#figure-2">Figure 2</a>). This transition increases speculative decoding's efficacy in two ways - 
+              It is well understood that Speculative Decoding is beneficial when LLM inference is memory-bounded. The following two observations are key to understanding why Speculative Decoding is useful even for large batches:
               <ol>
-                <li>Verification to autoregressive time ratio stays close to 1 even for large batches. Hence, even if some speculated tokens are rejected, the time penalty of verifying rejected tokens is relatively low. 
-                  <!-- Besides, verification ensures generation of atleast one token every iteration.</li> -->
-                <!-- <li>Our choice of speculation with StreamingLLM draft becomes increasingly useful, given the draft token acceptance rate is relatively unaffected with increasing sequence length.</li> -->
-                 <li>
-                  Our choice of speculation with StreamingLLM draft becomes increasingly useful as KV scales with sequence length but the draft token acceptance rate is relatively unaffected.
-                 </li>
+                <li>
+                  For every model and hardware pair, there exists a critical sequence length beyond which the model becomes memory bound even for large batch sizes. We illustrate this theoretically in <a style="color: #0b3c5d" href="#figure-2">Figure 2-a</a>.
+                </li>
+                <li>
+                  For moderate to long sequences, LLM inference becomes more and more memory-bound with increasing batch size!! We illustrate this behavior theoretically in <a style="color: #0b3c5d" href="#figure-2">Figure 2-b</a>.
+                </li>
               </ol>  
-              <!-- Our analysis for a batch size of 256 and a fixed StreamingLLM budget of 512 (Figure 2) shows that as sequences grow, bottlenecks shift from computation to memory. For instance, with a 4k sequence length for Llama-2, KV load times start to dominate as batch size increases. -->
-              
-              As <a href="#figure-2">Figure 2</a> shows, this transition happens quickly for non-GQA models like Llama-2-7B due to their larger KV memory footprint and lower arithmetic intensity. Additionally, for GPUs with a higher (peak_FLOPS / memory_bandwidth) ratio, such as the H100 and L40, this transition happens at shorter sequence lengths.
-              <!-- as KV memory footprint is relatively larger and arithmetic intensity is relatively low. In addition, for GPUs with larger (peak_FLOPS / memory_bandwith) ratio like H100 and L40, the transition happens at a lower sequence length.  -->
             </p>
             
             <div id="figure-2" class="image-container" style="display: flex; flex-direction: column; align-items: center;">
               <div style="display: flex; justify-content: space-around; width: 100%;">
-                <img src="static/images/kvloadtime.png" alt="KV Load Time" style="height: 400px; width: 400px; margin: 0 10px;" />
                 <img src="static/images/arithmetic_intensity.png" alt="Arithmetic Intensity" style="height: 400px; width: 400px; margin: 0 10px;" />
+                <img src="static/images/kvloadtime.png" alt="KV Load Time" style="height: 400px; width: 400px; margin: 0 10px;" />
               </div>
               <figcaption style="margin-top: 10px; text-align: center;">
-                <strong>Figure 2: (a) KV loading, weights loading, activations loading, and compute times for different batch sizes </strong>(Self Speculation LLaMA-2-7B, Prefill length 4000) on the left
-                <br> 
-                <strong>(b) Theoretical Arithmetic Intensity vs prefill length for different kinds of GPUs</strong>
+                <strong>Figure 2: (a) Theoretical Arithmetic Intensity vs prefill length for different kinds of GPUs</strong>
                 (LLaMA-2-7B and LLaMA-3.1-8B models, Batch Size 256) on the right
+                <br>
+                <strong>(b) KV, weights, activations, and compute times for different batch sizes </strong>(Self Speculation LLaMA-2-7B, Prefill length 4000) on the left
               </figcaption>
             </div>
             <br>
+            <p>
+              The critical sequence length is dependent on model type and hardware specifications. As can be seen in <a style="color: #0b3c5d" href="#figure-2">Figure 2-a</a>, for GQA type models, the critical sequence length is expected to be higher due to their relatively lighter KV memory footprint. On the other hand, for GPUs with higher <i>peak_flops / memory_bandwidth</i> ratio, the critical point arrives early.  
+              <br><br>
+              For moderately small sequence lengths and small batch sizes, LLM inference is essentially bottlenecked by parameter loading time. As batch size increases, the arithmetic intensity of the linear projections increases, making the model compute-bound. On the other hand, with increasing sequence length, KV loading time starts to become the primary memory bottleneck. 
+              
+              Interestingly, unlike model parameters, KV cache size increases linearly with batch size. Hence, once the KV cache becomes larger than the model memory footprint, both the memory loading time and computation time increase linearly with batch size. However, modern accelerators have much higher peak FLOPs per second than memory bandwidth. Consequently, the increase in memory loading time is more than the increase in computation time. This makes LLM inference more memory-bound in the high-throughput regime when the sequence length is long enough.
+            </p>
+            <br>
+            <h4 class="title is-5">
+              <img src="static/images/icons/Stonks_emoji.png" style="height: 36px; display: inline; vertical-align: middle;"/>
+              &nbsp; But how can we achieve Higher Speedup with Bigger Batches?
+            </h4>
+            <p>
+              Now we dig deeper into the speedup breakdown in <a style="color: #0b3c5d" href="#eq-1">Eq. 1</a> to understand how we can achieve higher speedup with bigger batches:
+              <ol>
+                <li>
+                  <strong><i>Verification of speculated tokens should not incur much extra cost compared to autoregressive decoding.</i></strong> In <a style="color: #0b3c5d" href="#figure-3">Figure 3</a>, we can see that for longer sequences, the target verification to decoding cost ratio remains close to 1 i.e. (T<sub>V</sub> / T<sub>T</sub> ≈ 1) even for super large batch sizes.
+                </li>
+                <li>
+                  <strong><i>A low draft to target cost ratio is preferred for higher speedup.
+                  </i></strong> In <a style="color: #0b3c5d" href="#figure-5">Figure 5</a>, we can see that this ratio goes down with increasing batch size i.e. (T<sub>D</sub> / T<sub>T</sub> →  0).
+                </li>
+                <li>
+                  <strong><i>The acceptance should ideally be close to 1.</i></strong> This quantity is not expected to change with batch size due to the i.i.d assumption for the batched sequences. Nevertheless, it is important to allow long speculation length.
+                </li>
+              </ol>
+            </p>
             <h4 class="title is-5">
               <img src="static/images/Verification.png" style="height: 36px; display: inline; vertical-align: middle;"/>
               &nbsp; Verification vs Target Latency
@@ -631,18 +523,9 @@
             <div style="display: flex; align-items: top; gap: 10px;">
               <div style="flex: 1;">
                 <p>
-                  <!-- A ratio close to 1 is ideal. While this holds true for smaller batch sizes, verification becomes expensive for small sequences as batch size grows. However, for sufficiently long sequences, as inference becomes memory-bound, the verification-to-target ratio approaches 1 again with increasing batch size. -->
-                  A low verification to target cost ratio is ideal for speculative decoding. While this ratio remains close to 1 for smaller batch sizes, verification becomes costly for small sequences as batch size grows.
-                
-                  For small batch sizes, 
-                  <!-- and moderately long sequences, -->
-                the model loading time is the main bottleneck which gets amortized by parallel verification of speculated tokens. However, with increasing batch size, LLM becomes more compute-bound, and the verification-to-target ratio increases. 
-                  
-                  Consequently, the target model spends more time verifying speculated tokens that are ultimately rejected, wasting compute resources. However, for sufficiently long sequences, as bottleneck shifts to KV-loading, the verification-to-target ratio stays close to 1 even for large batches. 
-                  
-                  Although verification can not amortize the cost of model loading time anymore, the increase KV loading time dominates over the computation time, making verification relatively less expensive. 
+                  With increasing batch size, verification of multiple tokens is expected to be significantly costlier than decoding as the computation time increases linearly with speculation length. However, when KV loading becomes the dominant bottleneck, the increase in KV loading time dominates the increase in computation time, restricting the verification to decoding cost ratio. As illustrated in <a style="color: #0b3c5d" href="#figure-3">Figure 3</a>, the cost ratio actually saturates to a value close to 1, especially for longer sequences.   
                 </p>
-                <div class="image-container" style="display: flex; flex-direction: column; align-items: center;">
+                <div id="figure-3" class="image-container" style="display: flex; flex-direction: column; align-items: center;">
                   <div style="display: flex; justify-content: space-around; width: 100%;">
                     <img src="static/images/ver_2_reg_llama2.png" alt="Ratio of Verification vs Target Time" style="height: 400px; width: 400px; margin: 0 10px;" />
                     <img src="static/images/ver_2_reg_llama3.png" alt="Ratio of Verification vs Target Time" style="height: 400px; width: 400px; margin: 0 10px;" />
@@ -660,64 +543,265 @@
               &nbsp; Draft vs Target Latency
             </h4>
             <p>
-              A low draft to target cost ratio is ideal for speculative decoding. Although a small draft model is usually used to speculate tokens, the shift in bottlenecks opens up the possibility of using better strategies for drafting. 
-
-              To tackle the KV cache loading bottleneck, we have taken inspiration from <a href="https://arxiv.org/pdf/2404.11912" rel="external nofollow noopener" target="_blank" style="color: #209CEE;">Triforce</a>. We use StreamingLLM to draft tokens, which is particularly effective because of small KV loading time.
-              
-              While the draft cost increases with larger batch sizes mainly due to increased computation time, the target cost rises even more due to the greater KV loading time.
-              <!-- For large batch sizes, the draft cost increases mostly because of increased computation time. However, the target cost increases even more because of increased KV loading time. -->
-              This makes the draft-to-target cost ratio decrease with increasing batch size, making speculative decoding more effective.
-              <div class="image-container" style="display: flex; flex-direction: column; align-items: center;">
+              We choose to use drafts with a fixed small KV budget for speculation to address the KV bottleneck. Otherwise in a high batch size and sequence length regime, the draft to target cost ratio will be decided by the draft to target memory loading ratio only. From <a style="color: #0b3c5d" href="#figure-4">Figure 4</a>., we can see that this ratio increases with batch size and then saturates for both  Llama2-7B/Llama2-70B and Llama-3.1-8B/Llama-3.1-70B draft-target pairs. To improve speedup with batchsize, we want this ratio to go down instead. 
+              <br>
+              Taking inspiration from <a href="https://arxiv.org/pdf/2404.11912" rel="external nofollow noopener" target="_blank" style="color: #209CEE;">Triforce</a>, we fix a small KV budget for the draft model such that the draft cost does not increase sharply with batchsize. As a result, the draft to target cost ratio decreases with increasing batch size, as shown in <a style="color: #0b3c5d" href="#figure-5">Figure 5</a>. Furthermore, given a fixed KV budget, the ratio naturally goes down more rapidly for longer sequence lengths. 
+              <!-- <br>
+              We use StreamingLLM to draft tokens, which is particularly effective because of small KV loading time. -->
+              <div id="figure-4" class="image-container" style="display: flex; flex-direction: column; align-items: center;">
+                <div style="display: flex; justify-content: space-around; width: 100%;">
+                  <img src="static/images/draft_to_target_mem_ratio_llama2.png" alt="Ratio of Draft vs Target Memory Loading Llama2-70b" style="height: 400px; width: 400px; margin: 0 10px;" />
+                  <img src="static/images/draft_to_target_mem_ratio_llama3.png" alt="Ratio of Draft vs Target Time Llama3-70b" style="height: 400px; width: 400px; margin: 0 10px;" />
+                </div>
+                <figcaption style="margin-top: 10px; text-align: center;">
+                  <strong>Figure 4: Theoretical Ratio of Draft (Full Cache) to Target Memory Loading vs Batch Size</strong>
+                  (left: LlaMA-2-7B/Llama-2-70B, right: LlaMA-3.1-8B/Llama-3.1-70B)
+                </figcaption>
+              </div>
+              <br>
+              <div id="figure-5" class="image-container" style="display: flex; flex-direction: column; align-items: center;">
                 <div style="display: flex; justify-content: space-around; width: 100%;">
                   <img src="static/images/draft_to_target_llama2.png" alt="Ratio of Draft vs Target Time" style="height: 400px; width: 400px; margin: 0 10px;" />
                   <img src="static/images/draft_to_target_llama3.png" alt="Ratio of Draft vs Target Time" style="height: 400px; width: 400px; margin: 0 10px;" />
                 </div>
                 <figcaption style="margin-top: 10px; text-align: center;">
-                  <strong>Figure 4: Theoretical Ratio of Draft (StreamingLLM budget=256) to Target Time vs Batch Size</strong>
-                  (left: LLaMA-2-7B, right: LLaMA-3.1-8B)
+                  <strong>Figure 5: Theoretical Ratio of Draft (StreamingLLM budget=256) to Target Time vs Batch Size</strong>
+                  (left: LlaMA-2-7B, right: LlaMA-3.1-8B)
                 </figcaption>
               </div>
             </p>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-  
-
-  <!-- Section: Conclusion and Future Work -->
-  <section class="section hero is-light">
-    <div class="container is-fluid">
-      <div class="columns is-centered">
-        <div class="column is-four-fifths">
-          <h2 class="title is-3" style="text-align: center;">
-            <img src="static/images/icons/Telescope.png" style="height: 50px; display: inline; vertical-align: middle;"/>
-            &nbsp; Conclusion and Future Work
-          </h2>
-          <div class="content has-text-justified">
+            <h4>
+              <img src="static/images/icons/choice_of_eggs.png" style="height: 36px; display: inline; vertical-align: middle;"/>
+              &nbsp; Choice of Drafts
+            </h4>
             <p>
-              This work reassesses the trade-off between throughput and latency in long-context scenarios. We demonstrate that <strong>speculative decoding can enhance throughput, reduce latency, and maintain accuracy</strong>. Our theoretical and empirical analysis reveals that as the sequence length and batch size increase, bottlenecks shift from being compute-bound to memory-bound. This shift enables effective use of speculative decoding for longer sequences, even with large batch sizes, achieving up to <strong>2x </strong> speedup for LLaMA-2-7B-32K and <strong>1.84x</strong> for LLaMA-3.1-8B on 8 A100 GPUs. These results highlight the importance of integrating speculative decoding into throughput optimization systems as long-context workloads become more prevalent.
+              To ensure a high acceptance rate for our draft with sparse KV, we use the StreamingLLM method. Interestingly, we find this simple method to be quite effective even for very long sequences. On PG-19 dataset, we find the acceptance rate of Llama-3.1-8B self-speculation with a streamingLLM budget of 512 to be relatively stable for sequence lengths ranging from 4000 to 100000.
             </p>
-          </div>
-          <div class="has-text-centered">
-            <img src="static/images/icons/MagicDec.png" alt="<i>TriForce</i>" width="200" height="200" />
+            <div style="width: 800px; margin: 0 auto;">
+              <table cellpadding="5" cellspacing="0" style="width: 100%; border-collapse: collapse;">
+                <thead>
+                  <tr style="border-bottom: 1px solid black;">
+                    <th>Sequence Length</th>
+                    <th>4000</th>
+                    <th>8000</th>
+                    <th>16000</th>
+                    <th>32000</th>
+                    <th>64000</th>
+                    <th>100000</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>Acceptance Rate</td>
+                    <td>0.84</td>
+                    <td>0.83</td>
+                    <td>0.82</td>
+                    <td>0.81</td>
+                    <td>0.79</td>
+                    <td>0.79</td>
+                  </tr>
+                </tbody>
+              </table>        
+            </div>
+            <br>  
+            <p>
+            With a high acceptance rate and a reasonable verification cost, we can afford to use a longer speculation length. Contrary to previous works (e.g., <a style="color: #209CEE" href="https://arxiv.org/abs/2406.14066">Liu et al, 2024</a>; <a style="color: #209CEE" href="https://arxiv.org/abs/2310.18813">Su et al, 2023</a>), we observe that the optimal speculation length goes up with increasing batch size.
+            </p>
+          </div>          
           </div>
         </div>
       </div>
     </div>
-  </section>
+</section>
+  
+<section>
+  <div class="container is-fluid">
+    <div class="columns is-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3" style="text-align: center;">
+          <img src="static/images/icons/experiments.png" style="height: 50px; display: inline; vertical-align: middle;"/>
+          &nbsp; Experiments
+        </h2>
+        <div class="content has-text-justified">
+          <p>
+            We evaluate the speed-up of MagicDec on Llama-2-7B-32K and LlaMA-3.1-8B-128K at different batch sizes and sequence lengths. The test sequences are sampled from the PG-19 dataset. For drafting, we have explored the following options: 
+            <ol>
+              <li><strong>Standalone tiny GQA model: </strong>For the Llama-2-7B-32K target model, we have used TinyLlama-1.1B for drafting. There are not many suitable small draft models for LlaMA-3.1-8B-128K with matching vocab size.
+              </li>
+              <li><strong>Self-speculation: </strong>StreamingLLM based self-speculation is used for speculating LlaMA-2-7B-32K and LlaMA-3.1-8B-128K models.
+              </li>
+            </ol>
+            For all draft models we experimented with streamingLLM KV cache of different budgets.
+            <br>
+            The experiments are conducted on 8 NVIDIA A100 gpus with 8-way tensor parallelism. We also tested on higher-end GPUs like NVIDIA H100_SXM and lower-cost alternatives like NVIDIA L40 gpus.
+            <br>
+            <br>
+            <div id="figure-6" class="image-container">
+              <img src="static/images/speedups_budget512.png" alt="Results" height="350" />
+              <figcaption style="font-size: 0.9em;">
+                <!-- <strong>Figure 1: End-to-end Speculative Decoding Speedups for Various Target-Draft pairs on 8 NVIDIA A100s.</strong> -->
+                <strong>  
+                  Figure 6: End-to-end Speculative Decoding Speedups (with optimal speculation length) on 8 NVIDIA A100s. </strong> (a) TinyLLaMA-1.1B Draft with LLaMA-2-7B-32K Target, (b) LLaMA-2-7B-32K with Self-Speculation, (c) LLaMA-3.1-8B with Self-Speculation.
+              </figcaption>
+            </div>
+            <br>
+            <br>
+            The empirical results clearly show an increasing trend in speedup for larger batch size. Furthermore, it is interesting to see that the optimal speculation length also increases with increasing batch size.  
+            <br>
+            For the GQA target model, the speed-up is expected to be lower because of better arithmetic intensity. Regardless, MagicDec is still able to achieve better speedups for larger batches.
+            <br><br>
+            <style>
+              table {
+                border-collapse: collapse;
+                width: 80%;
+                margin-left: auto;
+                margin-right: auto;
+              }
+              th, td {
+                text-align: left;
+                padding: 12px;
+              }
+              tr td {
+                border-bottom: 1px solid black;
+              }
+              th {
+                border-bottom: 2px solid black;
+              }
+              tr:nth-child(3) td, 
+              tr:nth-child(6) td {
+                border-bottom: 2px solid black;
+              }
+            </style>
+            
+            <table>
+              <caption style="caption-side: top; text-align: center; font-weight: bold; margin-bottom: 10px;">
+                End-to-end Speculative Decoding Speedups for Various Target-Draft pairs on 8xH100_SXMs
+              </caption>
+              <tr>
+                <th>Target</th>
+                <th>Draft</th>
+                <th>Prefill</th>
+                <th>Batch Size</th>
+                <th>Optimal Spec Len</th>
+                <th>Speedup</th>
+              </tr>
+              <tr>
+                <td>Llama3.1-8B</td>
+                <td>Selfspec</td>
+                <td>32000</td>
+                <td>32</td>
+                <td>3</td>
+                <td>1.23</td>
+              </tr>
+              <tr>
+                <td>Llama3.1-8B</td>
+                <td>Selfspec</td>
+                <td>32000</td>
+                <td>64</td>
+                <td>3</td>
+                <td>1.43</td>
+              </tr>
+              <tr>
+                <td>Llama2-7B</td>
+                <td>Selfspec</td>
+                <td>8000</td>
+                <td>32</td>
+                <td>3</td>
+                <td>1.19</td>
+              </tr>
+              <tr>
+                <td>Llama2-7B</td>
+                <td>Selfspec</td>
+                <td>8000</td>
+                <td>64</td>
+                <td>4</td>
+                <td>1.42</td>
+              </tr>
+              <tr>
+                <td>Llama2-7B</td>
+                <td>Selfspec</td>
+                <td>8000</td>
+                <td>128</td>
+                <td>4</td>
+                <td>1.65</td>
+              </tr>
+              <tr>
+                <td>Llama2-7B</td>
+                <td>Tinyllama1.1B</td>
+                <td>8000</td>
+                <td>32</td>
+                <td>2</td>
+                <td>1.32</td>
+              </tr>
+              <tr>
+                <td>Llama2-7B</td>
+                <td>Tinyllama1.1B</td>
+                <td>8000</td>
+                <td>64</td>
+                <td>3</td>
+                <td>1.48</td>
+              </tr>
+              <tr>
+                <td>Llama2-7B</td>
+                <td>Tinyllama1.1B</td>
+                <td>8000</td>
+                <td>128</td>
+                <td>3</td>
+                <td>1.64</td>
+              </tr>
+            </table>  
+            Because H100_SXM has higher peak_flops / memory_bandwidth ratio compared to A100, it helps MagicDec to achieve more speedup on H100_SXM GPUs.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+
+<!-- Section: Conclusion and Future Work -->
+<section class="section hero is-light">
+  <div class="container is-fluid">
+    <div class="columns is-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3" style="text-align: center;">
+          <img src="static/images/icons/Telescope.png" style="height: 50px; display: inline; vertical-align: middle;"/>
+          &nbsp; Conclusion and Future Work
+        </h2>
+        <div class="content has-text-justified">
+          <p>
+            This work reassesses the trade-off between throughput and latency in long-context scenarios. We demonstrate that <strong>Speculative Decoding can enhance throughput, reduce latency, and maintain accuracy</strong>. Our theoretical and empirical analysis reveals that as the sequence length and batch size increase, bottlenecks shift from being compute-bound to memory-bound. Furthermore, we exploit the nature of the memory bottleneck to achieve even higher speedups for larger batches.
+            MagicDec can achieve up to <strong>2x </strong> speedup for LLaMA-2-7B-32K and <strong>1.84x</strong> for LLaMA-3.1-8B on 8 A100 GPUs. 
+            However, the interesting observation about scaling speedup with batch size is definitely promising for high-throughput serving of long-context requests. So, stay tuned for more exciting results in the future!! 🚀
+          </p>
+        </div>
+        <div class="has-text-centered">
+          <img src="static/images/icons/MagicDec.png" alt="<i>TriForce</i>" width="200" height="200" />
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
   
   
   <!-- Section: References -->
   <section class="section" id="BibTeX">
-    <div class="container is-max-desktop content">
-      <h2 class="title">BibTeX</h2>
-      <pre><code>@article{ref,
-    title={MagicDec: Breaking the Latency-Throughput Tradeoff for Long Contexts with Speculative Decoding},
-    author={},
-    journal={},
-    year={2024}
-  }</code></pre>
+    <!-- <div class="container is-max-desktop content"> -->
+      <div class="container is-fluid">
+        <div class="columns is-centered">
+          <div class="column is-four-fifths">
+            <h2 class="title">BibTeX</h2>
+            <pre><code>@misc{chen2024magicdecbreakinglatencythroughputtradeoff,
+              title={MagicDec: Breaking the Latency-Throughput Tradeoff for Long Context Generation with Speculative Decoding}, 
+              author={Jian Chen and Vashisth Tiwari and Ranajoy Sadhukhan and Zhuoming Chen and Jinyuan Shi and Ian En-Hsu Yen and Beidi Chen},
+              year={2024},
+              eprint={2408.11049},
+              archivePrefix={arXiv},
+              primaryClass={cs.CL},
+              url={https://arxiv.org/abs/2408.11049}, 
+        }</code></pre>
+        </div>
+      </div>
     </div>
   </section>
   
