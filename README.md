@@ -70,3 +70,15 @@ ENABLE_INTRA_NODE_COMM=1 torchrun --standalone --nproc_per_node=8 tests/selfspec
 ## Environment Issue
 We discovered that installing Flash-Attention directly with the PyTorch nightly build causes performance issues. However, these issues are resolved if we first install PyTorch 2.4.0 along with Flash-Attention, and then upgrade to the nightly version of PyTorch. We have adopted this approach. We anticipate that these problems will be addressed with the release of PyTorch 2.5.0 and the officially supported version of Flash-Attention.
 
+## Citation
+If you find MagicDec useful or relevant to your project and research, please kindly cite our paper:
+
+```bibtex
+@article{chen2024magicdec,
+  title={MagicDec: Breaking the Latency-Throughput Tradeoff for Long Context Generation with Speculative Decoding},
+  author={Chen, Jian and Tiwari, Vashisth and Sadhukhan, Ranajoy and Chen, Zhuoming and Shi, Jinyuan and Yen, Ian En-Hsu and Chen, Beidi},
+  journal={arXiv preprint arXiv:2408.11049},
+  year={2024}
+}
+```
+
