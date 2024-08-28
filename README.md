@@ -56,7 +56,7 @@ ENABLE_INTRA_NODE_COMM=1 torchrun --standalone --nproc_per_node=8 tests/baseline
 ```
 
 ### Standalone Draft
-For standalone draft experiment, we use `--target` and `--model` to set the target checkpoint and draft checkpoint. `--model` should be set to the repo id of target model, which will used to load the corresponding tokenizer. `--rank_group` should be set to the GPU id we want to do tensor parallelism for the target model, and `--draft_group` should be set to the GPU id we want to do TP for the draft model. Here as Tinyllama 1.1b model only has 4 KV heads, so we can only use 4 GPUs to do TP for it. `--streamingllm_budget` should be set to the KV budget for the draft model.
+For standalone draft experiment, we use `--target` and `--model` to set the target and draft checkpoint. `--model_name` should be set to the repo id of target model, which will used to load the corresponding tokenizer. `--rank_group` should be set to the GPU id we want to do tensor parallelism for the target model, and `--draft_group` should be set to the GPU id we want to do TP for the draft model. Here as Tinyllama 1.1b model only has 4 KV heads, so we can only use 4 GPUs to do TP for it. `--streamingllm_budget` should be set to the KV budget for the draft model.
 ```bash
 ENABLE_INTRA_NODE_COMM=1 torchrun --standalone --nproc_per_node=8 tests/longspec_benchmark.py --target checkpoints/togethercomputer/LLaMA-2-7B-32K/model.pth --model checkpoints/TinyLlama/TinyLlama_v1.1/model.pth --model_name togethercomputer/LLaMA-2-7B-32K --rank_group 0 1 2 3 4 5 6 7 --draft_ranks 0 1 2 3 --gamma 3 --B 64 --prefix_len 16000 --gen_len 64 --streamingllm_budget 256 --benchmark --compile
 ```
