@@ -7,7 +7,6 @@ from torch import Tensor
 from torch.nn import functional as F
 import torch.distributed as dist
 import math 
-from FlashSpec.Engine.utils import custom_func, gqa_custom
 
 def find_multiple(n: int, k: int) -> int:
     if n % k == 0:

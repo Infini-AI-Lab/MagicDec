@@ -1,6 +1,6 @@
 import torch
-from FlashSpec.Engine.model_selfspec import Transformer
-from FlashSpec.Engine.utils import load_model_selfspec
+from MagicDec.Engine.model_selfspec import Transformer
+from MagicDec.Engine.utils import load_model_selfspec
 
 class LMBackend:
     def __init__(self, dtype = torch.bfloat16, device: str = "cuda:0", dec_list: list = [1], draft_dec_list: list = [1]) -> None:

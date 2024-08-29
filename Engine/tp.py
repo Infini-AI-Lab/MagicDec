@@ -15,7 +15,7 @@ else:
     # Distributed is not supported on MacOS
     funcol = None
 
-from FlashSpec.Engine.model import Attention, FeedForward, Transformer
+from MagicDec.Engine.model import Attention, FeedForward, Transformer
 from itertools import accumulate
 
 

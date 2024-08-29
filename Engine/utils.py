@@ -235,7 +235,7 @@ def setup_seed(seed):
      torch.backends.cudnn.deterministic = True
 
 def load_model(checkpoint_path, device, precision, use_tp, rank_group=None, group=None):
-    from FlashSpec.Engine.model import Transformer
+    from MagicDec.Engine.model import Transformer
     with torch.device('meta'):
         model = Transformer.from_name(checkpoint_path.parent.name)
     checkpoint = torch.load(str(checkpoint_path), mmap=True, weights_only=True)
@@ -244,7 +244,7 @@ def load_model(checkpoint_path, device, precision, use_tp, rank_group=None, grou
     model.load_state_dict(checkpoint, assign=True)
 
     if use_tp:
-        from FlashSpec.Engine.tp import apply_tp
+        from MagicDec.Engine.tp import apply_tp
         print("Applying tensor parallel to model ...")
         apply_tp(model, rank_group, group=group)
 
@@ -253,7 +253,7 @@ def load_model(checkpoint_path, device, precision, use_tp, rank_group=None, grou
 
 
 def load_model_draft(checkpoint_path, device, precision, use_tp, rank_group=None, group=None):
-    import FlashSpec.Engine.model_draft as draft
+    import MagicDec.Engine.model_draft as draft
     with torch.device('meta'):
         model = draft.Transformer.from_name(checkpoint_path.parent.name)
     checkpoint = torch.load(str(checkpoint_path), mmap=True, weights_only=True)
@@ -262,7 +262,7 @@ def load_model_draft(checkpoint_path, device, precision, use_tp, rank_group=None
     model.load_state_dict(checkpoint, assign=True)
 
     if use_tp:
-        from FlashSpec.Engine.tp import apply_tp
+        from MagicDec.Engine.tp import apply_tp
         print("Applying tensor parallel to model ...")
         apply_tp(model, rank_group, group=group)
 
@@ -270,7 +270,7 @@ def load_model_draft(checkpoint_path, device, precision, use_tp, rank_group=None
     return model.eval()
 
 def load_model_selfspec(checkpoint_path, device, precision, use_tp, rank_group=None, group=None):
-    import FlashSpec.Engine.model_selfspec as selfspec
+    import MagicDec.Engine.model_selfspec as selfspec
     with torch.device('meta'):
         model = selfspec.Transformer.from_name(checkpoint_path.parent.name)
     checkpoint = torch.load(str(checkpoint_path), mmap=True, weights_only=True)
@@ -279,7 +279,7 @@ def load_model_selfspec(checkpoint_path, device, precision, use_tp, rank_group=N
     model.load_state_dict(checkpoint, assign=True)
 
     if use_tp:
-        from FlashSpec.Engine.tp import apply_tp
+        from MagicDec.Engine.tp import apply_tp
         print("Applying tensor parallel to model ...")
         apply_tp(model, rank_group, group=group)
 

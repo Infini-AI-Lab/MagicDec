@@ -4,13 +4,13 @@ import sys
 sys.path.append("..")
 from pathlib import Path
 import torch.distributed as dist
-from FlashSpec.Engine.utils import setup_seed, sampling_argmax_batch
-from FlashSpec.Data.data_converter import convert_pg19_dataset
+from MagicDec.Engine.utils import setup_seed, sampling_argmax_batch
+from MagicDec.Data.data_converter import convert_pg19_dataset
 from transformers import AutoTokenizer
 from torch.utils.data.dataloader import DataLoader
 from tqdm import tqdm
 import argparse
-from FlashSpec.Engine.backend import LMBackend
+from MagicDec.Engine.backend import LMBackend
 
 parser = argparse.ArgumentParser(description='Process model configuration and partitions.')
 parser.add_argument('--model', type=Path, default=Path("checkpoints/meta-llama/Llama-2-7b-hf/model.pth"), help='model')
@@ -29,7 +29,7 @@ parser.add_argument('--printoutput', action='store_true', help='Whether to compi
 args = parser.parse_args()
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 global print
-from FlashSpec.Engine.tp import init_dist
+from MagicDec.Engine.tp import init_dist
 use_tp = len(args.rank_group) > 1
 global_group = None
 if use_tp:
