@@ -193,7 +193,7 @@
           </h2>
           <div class="content has-text-justified">
             <p>
-              The amount of inference being performed with LLMs is growing dramatically across many different use cases, many of which utilize the ever-increasing context lengths supported by these models. Thus, maximizing the inference throughput of these models—including at long context—is becoming an increasingly important problem. Higher throughput enables lower price per token for consumers and lower carbon footprint per token. From a capability perspective, higher throughput at long context unlocks numerous applications such as information extraction from large sets of documents, synthetic data generation for LLM training/fine-tuning, extended user-assistant chats, and agentic workflows (which typically require numerous LLM calls per user request). These applications often involve processing very long input sequences (e.g., long documents or chat histories), requiring models to process thousands of tokens to deliver intelligent outputs. High throughput at long context is particularly technically challenging due to its huge memory requirements for the KV cache. Conventional wisdom (e.g., Chen et al., 2023; Li et al., 2024; Liu et al., 2024) is that in the high-throughput regime (i.e., large batch sizes), speculative decoding—which leverages underutilized GPU compute during memory-bound decoding—does not make sense, because decoding will be compute-bound and the GPUs will thus be fully utilized. Surprisingly, we show analytically and empirically that for large batch sizes, if the input sequences are long enough, decoding once again becomes memory-bound due to the large size of the KV cache. Building on this key observation, we demonstrate that speculative decoding can increase throughput and latency by up to 2x on 8 A100s in this large-batch, long-context setting.
+              The amount of inference being performed with LLMs is growing dramatically across many different use cases, many of which utilize the ever-increasing context lengths supported by these models. Thus, maximizing the inference throughput of these models—including at long context—is becoming an increasingly important problem. Higher throughput enables lower price per token for consumers and lower carbon footprint per token. From a capability perspective, higher throughput at long context unlocks numerous applications such as information extraction from large sets of documents, synthetic data generation for LLM training/fine-tuning, extended user-assistant chats, and agentic workflows (which typically require numerous LLM calls per user request). These applications often involve processing very long input sequences (e.g., long documents or chat histories), requiring models to process thousands of tokens to deliver intelligent outputs. High throughput at long context is particularly technically challenging due to its huge memory requirements for the KV cache. Conventional wisdom (e.g., <a style="color: #209CEE" href="https://arxiv.org/pdf/2302.01318">Chen et al., 2023</a>; <a style="color: #209CEE" href="https://arxiv.org/pdf/2401.15077">Li et al., 2024</a>; <a style="color: #209CEE" href="https://arxiv.org/pdf/2401.15077">Liu et al., 2024</a>) is that in the high-throughput regime (i.e., large batch sizes), speculative decoding—which leverages underutilized GPU compute during memory-bound decoding—does not make sense, because decoding will be compute-bound and the GPUs will thus be fully utilized. Surprisingly, we show analytically and empirically that for large batch sizes, if the input sequences are long enough, decoding once again becomes memory-bound due to the large size of the KV cache. Building on this key observation, we demonstrate that speculative decoding can increase throughput and latency by up to <strong>2x on 8 A100s in this large-batch, long-context setting</strong>.
             </p>
             <p>
               In this blogpost, we first do a deep dive into the forward pass time of a single transformer layer during autoregressive decoding, and provide a simple equation—which we validate empirically—that describes when the forward pass will be memory-bound for a given hardware. More specifically, we analyze the fraction of the forward pass time that is taken by loading the KV cache. This analysis clearly shows that even for very large batch sizes, the layer will be memory-bound during decoding whenever the context length exceeds a threshold.
@@ -204,9 +204,9 @@
             <div className="disp">
               <ol>
                 <li>
-                  <strong>MagicDec:</strong> Taking advantage of the fact that the bottleneck during decoding at large batch + long context is loading the KV cache, MagicDec uses a fixed context window in the draft model to make the draft model many times faster than the target model (since the draft KV cache size is fixed). Furthermore, because in this regime loading the target model parameters is no longer the bottleneck, we can afford to use a very large and powerful draft model—we can even use the full target model as the draft model, as long as it uses a fixed context window. Based on these insights, MagicDec combines ideas from TriForce and StreamingLLM—as the draft model, it uses a StreamingLLM draft model (using sliding window attention + attention sink) with staged speculative decoding for further speedups during drafting. Intriguingly, in this regime, we get larger speedups the higher the batch size!
+                  <a style="color: #209CEE" href="https://arxiv.org/pdf/2408.11049">MagicDec</a>: Taking advantage of the fact that the bottleneck during decoding at large batch + long context is loading the KV cache, MagicDec uses a fixed context window in the draft model to make the draft model many times faster than the target model (since the draft KV cache size is fixed). Furthermore, because in this regime loading the target model parameters is no longer the bottleneck, we can afford to use a very large and powerful draft model—we can even use the full target model as the draft model, as long as it uses a fixed context window. Based on these insights, MagicDec combines ideas from TriForce and StreamingLLM—as the draft model, it uses a StreamingLLM draft model (using sliding window attention + attention sink) with staged speculative decoding for further speedups during drafting. Intriguingly, in this regime, <strong>we get larger speedups the higher the batch size!</strong>
                 <li>
-                  <strong>Adaptive Sequoia trees:</strong> Leveraging our observation that there is a sequence length threshold above which decoding becomes memory bound—and that it becomes increasingly memory bound for even longer sequence lengths—we propose choosing the amount of speculation as a function of the sequence length (longer sequence length -> more speculated tokens).  We leverage the Sequoia algorithm (see our paper, blog) to determine the tree structure for the speculated tokens that maximizes the expected number of generated tokens.
+                  <a style="color: #209CEE" target="_blank">Adaptive Sequoia trees</a>: Leveraging our observation that there is a sequence length threshold above which decoding becomes memory bound—and that it becomes increasingly memory bound for even longer sequence lengths—we propose choosing the amount of speculation as a function of the sequence length (longer sequence length -> more speculated tokens).  We leverage the Sequoia algorithm (see our <a style="color: #209CEE" href="https://arxiv.org/abs/2402.12374">paper</a>, <a style="color: #209CEE" href="https://www.together.ai/blog/sequoia">blog</a>) to determine the tree structure for the speculated tokens that maximizes the expected number of generated tokens. 
                 </li>
               </ol>
             </div>
@@ -376,7 +376,7 @@
 
               From this table, it is easy to see that for large enough sequence length n (and batch size b), the time to  load the KV cache will far exceed the operations involving the model parameters, regardless of whether those operations are compute bound or memory-bound.
               <br>
-              In Figure 1 we empirically validate that loading the KV cache dominates the forward pass time for a transformer layer, as the sequence length and batch size increase. In particular, we plot the fraction of decode time taken by the operations over the KV cache for a transformer layer with a model dimension of 1024. As you can see, as the sequence length increases, the empirical fraction approaches 1, and it approaches 1 more quickly for larger batch size. This result was quite exciting and surprising to us—counterintuitively, in the long-context regime, a larger batch size results in decoding <strong>being more memory bound</strong>, instead of the other way around. The communities focus on short/medium context may have resulted in this fact being overlooked until now.
+              In <a style="color: #0b3c5d" href="#figure-1">Figure 1</a> we empirically validate that loading the KV cache dominates the forward pass time for a transformer layer, as the sequence length and batch size increase. In particular, we plot the fraction of decode time taken by the operations over the KV cache for a transformer layer with a model dimension of 1024. As you can see, as the sequence length increases, the empirical fraction approaches 1, and it approaches 1 more quickly for larger batch size. This result was quite exciting and surprising to us—counterintuitively, in the long-context regime, a larger batch size results in decoding <strong>being more memory bound</strong>, instead of the other way around. The communities focus on short/medium context may have resulted in this fact being overlooked until now.
 
               <div id="figure-1" class="image-container" style="display: flex; flex-direction: column; align-items: center;">
                 <div style="display: flex; justify-content: space-around; width: 100%;">
@@ -447,8 +447,8 @@
                     </mrow>
                 </math>
             </div>
-
-              In Figure 2, we show that for large sequence lengths, $T_{verify}/$T_{decode}$ approaches 1, which implies that speculative decoding can give meaningful speedups.
+             <br>
+              In <a style="color: #0b3c5d" href="#figure-2">Figure 2</a>, we show that for large sequence lengths, $T_{verify}/$T_{decode}$ approaches 1, which implies that speculative decoding can give meaningful speedups.
               <br> <br> 
               <div id="figure-2" class="image-container" style="display: flex; flex-direction: column; align-items: center;">
                 <div style="display: flex; justify-content: space-around; width: 100%;">
@@ -459,6 +459,7 @@
                   </strong>
                 </figcaption>
               </div>
+              <br>
               We will now detail our two algorithmic innovations—MagicDec and adaptive Sequoia trees—related to performing speculative decoding in this high-throughput regime.
             </p>
         </div>
@@ -480,7 +481,7 @@
             A low draft-to-verify cost ratio is ideal for speculative decoding. In the low-latency regime in which speculative decoding is normally applied (i.e., low batch size), the bottleneck during decoding is the time to load the target model parameters—therefore, using a small draft model is generally the key to attaining a low draft to verify ratio. However, in the high throughput regime we are interested in here, the bottleneck is loading the target model KV cache. This shift in bottlenecks opens up the possibility of using better strategies for drafting. In particular, we can afford to use a larger and more powerful target model as long as its KV cache is kept small.
           </p>
           <p>
-            Thus, we propose using self-speculation, where the target model is used as the draft model, but with limited context size. More specifically, we use StreamingLLM, which uses sliding window attention combined with an “attention sink” (allows attending over the first token) to limit the size of the KV cache. While the draft cost increases with larger batch sizes mainly due to increased computation time, the verification cost rises even more due to the greater KV loading time. This makes the draft-to-target cost ratio decrease with increasing batch size (see Figure 4), surprisingly making speculative decoding more effective for larger batch sizes. To further speed up the drafting process, we can use <a style="color: #209CEE" href="https://arxiv.org/pdf/2404.11912">staged speculative decoding</a>, similarly to <a style="color: #209CEE" href="https://arxiv.org/pdf/2404.11912">TriForce</a>.
+            Thus, we propose using self-speculation, where the target model is used as the draft model, but with limited context size. More specifically, we use StreamingLLM, which uses sliding window attention combined with an “attention sink” (allows attending over the first token) to limit the size of the KV cache. While the draft cost increases with larger batch sizes mainly due to increased computation time, the verification cost rises even more due to the greater KV loading time. This makes the draft-to-target cost ratio decrease with increasing batch size (see <a style="color: #0b3c5d" href="#figure-3">Figure 3</a>), surprisingly making speculative decoding more effective for larger batch sizes. To further speed up the drafting process, we can use <a style="color: #209CEE" href="https://arxiv.org/pdf/2404.11912">staged speculative decoding</a>, similarly to <a style="color: #209CEE" href="https://arxiv.org/pdf/2404.11912">TriForce</a>.
             <br> <br> 
               <div id="figure-3" class="image-container" style="display: flex; flex-direction: column; align-items: center;">
                 <div style="display: flex; justify-content: space-around; width: 100%;">
@@ -492,7 +493,7 @@
                 </figcaption>
               </div>
             </p>
-            In Table 1, we demonstrate preliminary results attaining speedups of up to 2x for LLaMA-2-7B-32K and 1.84x for LLaMA-3.1-8B on 8 A100 GPUs.
+            In Table 2, we demonstrate preliminary results attaining speedups of up to 2x for LLaMA-2-7B-32K and 1.84x for LLaMA-3.1-8B on 8 A100 GPUs.
           <p>
             <style>
               #table1 {
@@ -518,7 +519,7 @@
               }
             </style>
             <table id="table1">
-              <caption>Table 1: End-to-end Speculative Decoding Speedups for Various Target-Draft pairs on 8xA100s.</caption>
+              <caption>Table 2: End-to-end Speculative Decoding Speedups for Various Target-Draft pairs on 8xA100s.</caption>
               <thead>
                   <tr>
                       <th>Target</th>
@@ -716,6 +717,7 @@
               </mrow>
           </math>
         </div>
+        <br>
         <p>
           For G(L, D), we can find the maximal expected number of generated tokens for a Sequoia tree of size L and depth D.  For T<sub>model</sub>(b, n, L), we can just measure forward pass times for the target/draft models for many combinations of b, n, L, and perhaps fit these results with a parametric function.
         </p>
