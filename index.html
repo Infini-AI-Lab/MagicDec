@@ -650,6 +650,7 @@
             <br>
             For the GQA target model, the speed-up is expected to be lower because of better arithmetic intensity. Regardless, MagicDec is still able to achieve better speedups for larger batches.
             <br><br>
+            
             <style>
               table {
                 border-collapse: collapse;
@@ -667,13 +668,123 @@
               th {
                 border-bottom: 2px solid black;
               }
-              tr:nth-child(3) td, 
-              tr:nth-child(6) td {
+            
+              /* Fix for table1 */
+              #table1 tr:nth-child(4) td,
+              #table1 tr:nth-child(8) td {
+                border-bottom: 2px solid black;
+              }
+            
+              /* Fix for table2 */
+              #table2 tr:nth-child(3) td,
+              #table2 tr:nth-child(6) td {
                 border-bottom: 2px solid black;
               }
             </style>
             
-            <table>
+            <table id="table1">
+              <caption style="caption-side: top; text-align: center; font-weight: bold; margin-bottom: 10px;">
+                End-to-end Speculative Decoding Speedups for Various Target-Draft pairs on 8xA100s
+              </caption>
+              <tr>
+                <th>Target</th>
+                <th>Draft</th>
+                <th>Prefill</th>
+                <th>Batch Size</th>
+                <th>Optimal Spec Len</th>
+                <th>Speedup</th>
+              </tr>
+              <tr>
+                <td>Llama3.1-8B</td>
+                <td>Selfspec</td>
+                <td>32000</td>
+                <td>32</td>
+                <td>3</td>
+                <td>1.22</td>
+              </tr>
+              <tr>
+                <td>Llama3.1-8B</td>
+                <td>Selfspec</td>
+                <td>32000</td>
+                <td>64</td>
+                <td>3</td>
+                <td>1.38</td>
+              </tr>
+              <tr>
+                <td>Llama3.1-8B</td>
+                <td>Selfspec</td>
+                <td>32000</td>
+                <td>128</td>
+                <td>4</td>
+                <td>1.47</td>
+              </tr>
+              <tr>
+                <td>Llama2-7B</td>
+                <td>Selfspec</td>
+                <td>8000</td>
+                <td>32</td>
+                <td>3</td>
+                <td>1.18</td>
+              </tr>
+              <tr>
+                <td>Llama2-7B</td>
+                <td>Selfspec</td>
+                <td>8000</td>
+                <td>64</td>
+                <td>3</td>
+                <td>1.48</td>
+              </tr>
+              <tr>
+                <td>Llama2-7B</td>
+                <td>Selfspec</td>
+                <td>8000</td>
+                <td>128</td>
+                <td>4</td>
+                <td>1.63</td>
+              </tr>
+              <tr>
+                <td>Llama2-7B</td>
+                <td>Selfspec</td>
+                <td>32000</td>
+                <td>32</td>
+                <td>4</td>
+                <td>2.0</td>
+              </tr>
+              <tr>
+                <td>Llama2-7B</td>
+                <td>Tinyllama1.1B</td>
+                <td>8000</td>
+                <td>32</td>
+                <td>3</td>
+                <td>1.29</td>
+              </tr>
+              <tr>
+                <td>Llama2-7B</td>
+                <td>Tinyllama1.1B</td>
+                <td>8000</td>
+                <td>64</td>
+                <td>3</td>
+                <td>1.57</td>
+              </tr>
+              <tr>
+                <td>Llama2-7B</td>
+                <td>Tinyllama1.1B</td>
+                <td>8000</td>
+                <td>128</td>
+                <td>4</td>
+                <td>1.66</td>
+              </tr>
+              <tr>
+                <td>Llama2-7B</td>
+                <td>Tinyllama1.1B</td>
+                <td>32000</td>
+                <td>32</td>
+                <td>4</td>
+                <td>1.91</td>
+              </tr>
+            </table>  
+            <br>
+            <table id="table2">
               <caption style="caption-side: top; text-align: center; font-weight: bold; margin-bottom: 10px;">
                 End-to-end Speculative Decoding Speedups for Various Target-Draft pairs on 8xH100_SXMs
               </caption>
