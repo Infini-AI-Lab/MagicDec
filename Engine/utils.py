@@ -2,109 +2,44 @@ import torch
 import numpy as np
 import random
 from torch.nn.functional import softmax
-from flash_attn import flash_attn_with_kvcache
+import flashinfer
 
 torch.library.define(
-    "mylib::custom_func",
-    "(Tensor q, Tensor(a!) k_cache, Tensor(b!) v_cache, Tensor k, Tensor v, Tensor cache_seqlens) -> Tensor",
+    "mylib::update_kv",
+    "(Tensor k, Tensor v, Tensor kv_append_indptr, Tensor(a!) kv_cache, Tensor kv_page_indices, Tensor kv_page_indptr, Tensor cachelen) -> ()",
 )
 
-@torch.library.impl("mylib::custom_func", "cuda")
-def custom_func(q, k_cache, v_cache, k, v, cache_seqlens):
-    return flash_attn_with_kvcache(
-        q, k_cache, v_cache, k=k, v=v, cache_seqlens=cache_seqlens, causal=True
-    )
+@torch.library.impl("mylib::update_kv", "cuda")
+def update_kv(
+            k,
+            v,
+            kv_append_indptr,
+            kv_cache,
+            kv_page_indices,
+            kv_page_indptr,
+            kv_page_last_len,
+        ):
+        flashinfer.append_paged_kv_cache(
+            k,
+            v,
+            kv_append_indptr,
+            kv_cache,
+            kv_page_indices,
+            kv_page_indptr,
+            kv_page_last_len,
+        )
 
-@torch.library.impl_abstract("mylib::custom_func")
-def custom_func_abstract(q, k_cache, v_cache, k, v, cache_seqlens):
-    return torch.empty_like(q)
-
-torch.library.define(
-    "mylib::custom_func_2",
-    "(Tensor q, Tensor(a!) k_cache, Tensor(a!) v_cache) -> Tensor",
-)
-
-@torch.library.impl("mylib::custom_func_2", "cuda")
-def custom_func_2(q, k_cache, v_cache):
-    return flash_attn_with_kvcache(
-        q, k_cache, v_cache, causal=True
-    )
-
-@torch.library.impl_abstract("mylib::custom_func_2")
-def custom_func_2_abstract(q, k_cache, v_cache):
-    return torch.empty_like(q)
-
-torch.library.define(
-    "mylib::gqa_custom",
-    "(Tensor q, Tensor(a!) k_cache, Tensor(b!) v_cache, Tensor k, Tensor v, Tensor cache_seqlens) -> Tensor",
-)
-
-@torch.library.impl_abstract("mylib::gqa_custom")
-def gqa_custom_abstract(q, k_cache, v_cache, k, v, cache_seqlens):
-    return torch.empty_like(q)
-
-# @torch.library.impl("mylib::gqa_custom", "cuda")
-# def gqa_custom(q, k_cache, v_cache, k, v, cache_seqlens):
-#     B, T, H_q, D = q.size()
-#     H_k = k.size(2)
-#     rep = H_q // H_k
-#     q_reshaped = q.view(B, T, H_k, rep, D).transpose(2, 3).contiguous().view(B, T*rep, H_k, D).contiguous()
-#     y_past, lse_past = flash_attn_with_kvcache(q_reshaped, k_cache, v_cache, None, None, cache_seqlens=cache_seqlens, causal=True, return_softmax_lse=True)
-#     y_new, lse_new = flash_attn_with_kvcache(q, k, v, None, None, None, causal=True, return_softmax_lse=True)     
-#     y_past = y_past.view(B, T, rep, H_k, D).transpose(2, 3).contiguous().view(B, T, H_q, D)
-#     lse_past = rearrange(lse_past, 'b h (t r) -> b t (h r) 1', r=rep).contiguous()
-    
-#     lse_past = lse_past.to(y_past.dtype)
-#     lse_new = lse_new.unsqueeze(-1).transpose(1, 2).to(y_new.dtype)
-    
-#     sumexp_past = torch.exp(lse_past.float())
-#     sumexp_new = torch.exp(lse_new.float())
-
-#     sumexp_total = sumexp_past + sumexp_new
-#     y = (y_past * sumexp_past + y_new * sumexp_new) / sumexp_total
-    
-#     # insert new k and v to k_cache and v_cache, starting from cache_seqlens position
-#     insert_indices = cache_seqlens.unsqueeze(-1) + torch.arange(T, device=cache_seqlens.device).unsqueeze(0)
-#     insert_indices = insert_indices[..., None, None].expand(-1, -1, H_k, D)
-#     k_cache.scatter_(1, insert_indices, k)
-#     v_cache.scatter_(1, insert_indices, v)   
-
-#     return y.to(q.dtype)
-
-@torch.library.impl("mylib::gqa_custom", "cuda")
-def gqa_custom(q, k_cache, v_cache, k, v, cache_seqlens):
-    B, T, H_q, D = q.size()
-    H_k = k.size(2)
-    rep = H_q // H_k
-    q_reshaped = q.view(B, T, H_k, rep, D).transpose(2, 3).contiguous().view(B, T*rep, H_k, D).contiguous()
-    v_new = torch.zeros(B, T*rep, H_k, D, device=q.device, dtype=q.dtype)
-    k_new = torch.zeros_like(v_new)
-    
-    # the extra 1's added to the partition functions
-    # they are of the pattern [0, 1, 2, ..., rep-1, rep-1, rep, rep+1, ..., 2*rep-1, 2*rep-1, 2*rep, ...]
-    offset = torch.ones(rep, device=q.device, dtype=q.dtype)
-    offset[0].zero_()
-    extra = torch.cumsum(offset.repeat(T), dim=0)[None, None, :]
-    insert_indices = torch.arange(0, T*rep, rep, device=q.device)[None, :, None, None].expand(B, -1, H_k, D)
-    k_new.scatter_(1, insert_indices, k)
-    v_new.scatter_(1, insert_indices, v)
-    
-    # print(q_reshaped.shape, k_cache.shape, k_new.shape)
-    y, lse = flash_attn_with_kvcache(q_reshaped, k_cache, v_cache, k_new, v_new, cache_seqlens=cache_seqlens, causal=True, return_softmax_lse=True)
-    
-    extra = extra.expand_as(lse)
-    correction = 1./ (1 - extra * torch.exp(-lse))
-    correction = correction.transpose(1, 2).unsqueeze(-1)
-    y = y * correction.to(y.dtype)
-    y = y.view(B, T, rep, H_k, D).transpose(2, 3).contiguous().view(B, T, H_q, D)
-    
-    # insert new k and v to k_cache and v_cache, starting from cache_seqlens position
-    insert_indices = cache_seqlens.unsqueeze(-1) + torch.arange(T, device=cache_seqlens.device).unsqueeze(0)
-    insert_indices = insert_indices[..., None, None].expand(-1, -1, H_k, D)
-    k_cache.scatter_(1, insert_indices, k)
-    v_cache.scatter_(1, insert_indices, v)   
-
-    return y.to(q.dtype)
+@torch.library.register_fake("mylib::update_kv")
+def update_kv_abstract(
+            k,
+            v,
+            kv_append_indptr,
+            kv_cache,
+            kv_page_indices,
+            kv_page_indptr,
+            kv_page_last_len,
+        ):
+    return None
 
 def get_sampling_logits(logits :torch.Tensor, top_p:float, T: float, replicate = False):
     if replicate:

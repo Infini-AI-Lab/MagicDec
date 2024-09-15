@@ -30,9 +30,9 @@
 ``` bash
 conda create -n magicdec python=3.11
 conda activate magicdec
-pip install -r requirements.txt
-pip install flash-attn --no-build-isolation
 pip install torch==2.5.0.dev20240813+cu121 --index-url https://download.pytorch.org/whl/nightly/cu121/
+pip install -r requirements.txt
+pip install flashinfer -i https://flashinfer.ai/whl/cu121/torch2.4/
 ```
 
 ### Prepare Checkpoints
