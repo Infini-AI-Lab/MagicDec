@@ -104,28 +104,27 @@ class Transformer(nn.Module):
             b.attention.kv_cache = KVCache(num_pages, page_size, self.config.n_local_heads, head_dim, dtype)
             b.attention.attn_decode = torch.ops.mylib.target_decode
             b.attention.attn_prefill = torch.ops.mylib.target_prefill
+            b.attention.rope = torch.ops.mylib.llama31rope
 
-        if (self.config.high_freq_factor is not None) and (self.config.low_freq_factor is not None):
-            self.freqs_cis = precompute_freqs_cis(self.config.block_size, self.config.dim // self.config.n_head, self.config.rope_base,dtype,
-                                                  self.config.scaling_factor, self.config.low_freq_factor, self.config.high_freq_factor, self.config.original_max_position_embeddings)
-        else:
-            self.freqs_cis = precompute_freqs_cis(self.config.block_size, self.config.dim // self.config.n_head, self.config.rope_base,dtype,
-                                                  self.config.scaling_factor)
+        # if (self.config.high_freq_factor is not None) and (self.config.low_freq_factor is not None):
+        #     self.freqs_cis = precompute_freqs_cis(self.config.block_size, self.config.dim // self.config.n_head, self.config.rope_base,dtype,
+        #                                           self.config.scaling_factor, self.config.low_freq_factor, self.config.high_freq_factor, self.config.original_max_position_embeddings)
+        # else:
+        #     self.freqs_cis = precompute_freqs_cis(self.config.block_size, self.config.dim // self.config.n_head, self.config.rope_base,dtype,
+        #                                           self.config.scaling_factor)
 
-    def forward(self, idx: Tensor, input_pos: Optional[Tensor], kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
-        freqs_cis = self.freqs_cis[input_pos]
+    def forward(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
         x = self.tok_embeddings(idx)
         for i, layer in enumerate(self.layers):
-            x = layer(x, freqs_cis, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+            x = layer(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
         x = self.norm(x)
         logits = self.output(x)
         return logits
 
-    def prefill(self, idx: Tensor, input_pos: Optional[Tensor], kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
-        freqs_cis = self.freqs_cis[input_pos]
+    def prefill(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
         x = self.tok_embeddings(idx)
         for i, layer in enumerate(self.layers):
-            x = layer.prefill(x, freqs_cis, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+            x = layer.prefill(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
         x = self.norm(x)
         logits = self.output(x)
         return logits
@@ -143,13 +142,13 @@ class TransformerBlock(nn.Module):
         self.ffn_norm = RMSNorm(config.dim, config.norm_eps)
         self.attention_norm = RMSNorm(config.dim, config.norm_eps)
 
-    def forward(self, x: Tensor, freqs_cis: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
-        h = x + self.attention(self.attention_norm(x), freqs_cis, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+    def forward(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
+        h = x + self.attention(self.attention_norm(x), offsets, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
         out = h + self.feed_forward(self.ffn_norm(h))
         return out
 
-    def prefill(self, x: Tensor, freqs_cis: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
-        h = x + self.attention.prefill(self.attention_norm(x), freqs_cis, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+    def prefill(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
+        h = x + self.attention.prefill(self.attention_norm(x), offsets, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
         out = h + self.feed_forward(self.ffn_norm(h))
         return out
 
@@ -167,6 +166,7 @@ class Attention(nn.Module):
         self.process_group = None
         self.attn_decode = None
         self.attn_prefill = None
+        self.rope = None
 
         self.n_head = config.n_head
         self.head_dim = config.head_dim
@@ -181,48 +181,33 @@ class Attention(nn.Module):
             wv = state_dict.pop(prefix + "wv.weight")
             state_dict[prefix + "wqkv.weight"] = torch.cat([wq, wk, wv])
 
-    def forward(self, x: Tensor, freqs_cis: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
+    def forward(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
         bsz, seqlen, _ = x.shape
-
         kv_size = self.n_local_heads * self.head_dim
         q, k, v = self.wqkv(x).split([self.dim, kv_size, kv_size], dim=-1)
-
-        q = q.view(bsz, seqlen, self.n_head, self.head_dim)
-        k = k.view(bsz, seqlen, self.n_local_heads, self.head_dim)
-        v = v.view(bsz, seqlen, self.n_local_heads, self.head_dim).contiguous().view(-1, self.n_local_heads, self.head_dim)
-        q = apply_rotary_emb(q, freqs_cis).contiguous().view(-1, self.n_head, self.head_dim)
-        k = apply_rotary_emb(k, freqs_cis).contiguous().view(-1, self.n_local_heads, self.head_dim)
-
+        q = q.view(bsz * seqlen, self.n_head, self.head_dim)
+        k = k.view(bsz * seqlen, self.n_local_heads, self.head_dim)
+        v = v.contiguous().view(bsz * seqlen, self.n_local_heads, self.head_dim)
+        q, k = self.rope(q, k, kv_append_indptr, offsets)
         kv_cache = self.kv_cache.update(k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
-
         y = self.attn_decode(q, kv_cache)
-
         y = y.contiguous().view(bsz, seqlen, self.dim)
-
         y = self.wo(y)
         if self.process_group != None:
             dist.all_reduce(y)
         return y
 
-    def prefill(self, x: Tensor, freqs_cis: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
+    def prefill(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
         bsz, seqlen, _ = x.shape
-
         kv_size = self.n_local_heads * self.head_dim
         q, k, v = self.wqkv(x).split([self.dim, kv_size, kv_size], dim=-1)
-
-        q = q.view(bsz, seqlen, self.n_head, self.head_dim)
-        k = k.view(bsz, seqlen, self.n_local_heads, self.head_dim)
-        v = v.view(bsz, seqlen, self.n_local_heads, self.head_dim).contiguous().view(-1, self.n_local_heads, self.head_dim)
-
-        q = apply_rotary_emb(q, freqs_cis).contiguous().view(-1, self.n_head, self.head_dim)
-        k = apply_rotary_emb(k, freqs_cis).contiguous().view(-1, self.n_local_heads, self.head_dim)
-
+        q = q.view(bsz * seqlen, self.n_head, self.head_dim)
+        k = k.view(bsz * seqlen, self.n_local_heads, self.head_dim)
+        v = v.contiguous().view(bsz * seqlen, self.n_local_heads, self.head_dim)
+        q, k = self.rope(q, k, kv_append_indptr, offsets)
         kv_cache = self.kv_cache.update(k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
-
         y = self.attn_prefill(q, kv_cache)
-
         y = y.contiguous().view(bsz, seqlen, self.dim)
-
         y = self.wo(y)
         if self.process_group != None:
             dist.all_reduce(y)
@@ -255,64 +240,3 @@ class RMSNorm(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         output = self._norm(x.float()).type_as(x)
         return output * self.weight
-
-
-def _compute_llama3_parameters(inv_freq, old_context_len=8192, scaling_factor=8,low_freq_factor=1,high_freq_factor=4):
-    """
-    To be used for llama 3.1 models
-        - borrowing the logic from: https://github.com/huggingface/transformers/blob/c85510f958e6955d88ea1bafb4f320074bfbd0c1/src/transformers/modeling_rope_utils.py
-        - source: _compute_llama3_parameters in modeling_rope_utils.py
-    """
-    low_freq_wavelen = old_context_len / low_freq_factor
-    high_freq_wavelen = old_context_len / high_freq_factor
-    new_freqs = []
-    for freq in inv_freq:
-        wavelen = 2 * math.pi / freq
-        if wavelen < high_freq_wavelen:
-            new_freqs.append(freq)
-        elif wavelen > low_freq_wavelen:
-            new_freqs.append(freq / scaling_factor)
-        else:
-            assert low_freq_wavelen != high_freq_wavelen
-            smooth = (old_context_len / wavelen - low_freq_factor) / (high_freq_factor - low_freq_factor)
-            new_freqs.append((1 - smooth) * freq / scaling_factor + smooth * freq)
-    inv_freq = torch.tensor(new_freqs, dtype=inv_freq.dtype, device=inv_freq.device)
-    return inv_freq
-
-def precompute_freqs_cis(
-    seq_len: int, n_elem: int, base: int = 10000,
-    dtype: torch.dtype = torch.bfloat16,
-    scaling_factor: float = 1.0, # added new 
-    low_freq_factor: int = None, # added new
-    high_freq_factor: int = None, # added new
-    original_max_position_embeddings: int = None, # added new
-) -> Tensor:
-    print(f"target: seq_len: {seq_len}, n_elem: {n_elem}, base: {base}, dtype: {dtype}, scaling_factor: {scaling_factor}, low_freq_factor: {low_freq_factor}, high_freq_factor: {high_freq_factor}, original_max_position_embeddings: {original_max_position_embeddings}"
-          )
-    freqs = 1.0 / (base ** (torch.arange(0, n_elem, 2)[: (n_elem // 2)].float() / n_elem))
-    
-    if (low_freq_factor is not None) and (high_freq_factor is not None):
-        freqs = _compute_llama3_parameters(freqs, original_max_position_embeddings, scaling_factor, low_freq_factor,high_freq_factor)
-    else:
-        freqs /= scaling_factor
-    t = torch.arange(seq_len, device=freqs.device, dtype=freqs.dtype)
-    freqs = torch.outer(t, freqs)
-    freqs_cis = torch.polar(torch.ones_like(freqs), freqs)
-    cache = torch.stack([freqs_cis.real, freqs_cis.imag], dim=-1)
-    return cache.to(dtype=dtype)
-
-
-
-def apply_rotary_emb(x: Tensor, freqs_cis: Tensor) -> Tensor:
-    xshaped = x.float().reshape(*x.shape[:-1], -1, 2)
-    freqs_cis = freqs_cis.view(x.shape[0], xshaped.size(1), 1, xshaped.size(3), 2)
-    x_out2 = torch.stack(
-        [
-            xshaped[..., 0] * freqs_cis[..., 0] - xshaped[..., 1] * freqs_cis[..., 1],
-            xshaped[..., 1] * freqs_cis[..., 0] + xshaped[..., 0] * freqs_cis[..., 1],
-        ],
-        -1,
-    )
-
-    x_out2 = x_out2.flatten(3)
-    return x_out2.type_as(x)

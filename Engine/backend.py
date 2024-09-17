@@ -88,12 +88,11 @@ class LMBackend:
     @torch.inference_mode()
     def inference(self, input_ids: torch.LongTensor, benchmark = False):
             dec_len = input_ids.shape[1]
-            position_ids = self.cachelens.view(-1,1) + torch.arange(dec_len, device=self.device).unsqueeze(0).repeat(self.batch_size,1)
             self.pre_decode(dec_len=dec_len, benchmark=benchmark)
             logits = self.model_forward(
                 model=self.model, 
                 x=input_ids.clone(),
-                input_pos=position_ids.clone(), 
+                input_pos=self.cachelens.clone(), 
                 kv_append_indptr = self.qo_indptr*dec_len, kv_page_indices = self.paged_kv_indices, kv_page_indptr= self.paged_kv_indptr, kv_page_lastlen = self.paged_kv_last_page_len)
             if not benchmark:
                 self.cachelens += dec_len
@@ -120,7 +119,6 @@ class LMBackend:
         self.clear_kv()
         logits = None
         seq_len = input_ids.shape[1]
-        position_ids = torch.arange(seq_len, device=self.device).unsqueeze(0).repeat(self.batch_size,1)
 
         chunk_size = 128
         num_chunks = (seq_len + chunk_size - 1) // chunk_size  # Ceil division
@@ -128,18 +126,15 @@ class LMBackend:
             start_idx = i * chunk_size
             end_idx = min((i + 1) * chunk_size, seq_len)
             chunk_input_ids = input_ids[:, start_idx:end_idx]
-            chunk_position_ids = position_ids[:, start_idx:end_idx]
             dec_len = end_idx-start_idx
             self.pre_encode(dec_len=dec_len)
-
             logits = self.prefill(
                 model=self.model,
                 x=chunk_input_ids,
-                input_pos=chunk_position_ids,
+                input_pos=self.cachelens,
                 kv_append_indptr = self.qo_indptr*dec_len, kv_page_indices = self.paged_kv_indices, kv_page_indptr= self.paged_kv_indptr, kv_page_lastlen = self.paged_kv_last_page_len
             )
-
-        self.cachelens += seq_len
+            self.cachelens += dec_len
         
         return logits
     
