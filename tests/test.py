@@ -51,7 +51,7 @@ if args.compile:
 llm.setup_caches(max_batch_size=max_batch_size, max_seq_length=max_seq_length)
 
 prompt = torch.randint(low=3, high=30000, size=(max_batch_size, prefix_len), device=device)
-llm.encode(input_ids=prompt)
+llm.encode(input_ids=prompt, benchmark=True)
 
 profile = args.profile
 
@@ -75,7 +75,10 @@ with torch.inference_mode():
             t2 = time.perf_counter()
             total_time += t2 - t1
 print("Batch Size:{}, Max Length :{}, Decode Length :{}, Prefix Length :{}, inference time:{}s".format(max_batch_size, max_seq_length, declen, prefix_len, total_time / T))
+torch.cuda.synchronize()
 with prof:
+    llm.inference(input_ids=dec, benchmark=True)
+    llm.inference(input_ids=dec, benchmark=True)
     llm.inference(input_ids=dec, benchmark=True)
 if hasattr(prof, "export_chrome_trace"):
         if use_tp:
