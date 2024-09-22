@@ -16,7 +16,7 @@ class LMBackend:
         self.model: Transformer = load_model(checkpoint_path=checkpoints, device=self.device, precision=self.dtype, use_tp=use_tp, rank_group=rank_group, group=group)        
 
     @torch.inference_mode()
-    def setup_caches(self, max_batch_size: int = 1, max_seq_length: int = 2048):
+    def setup_caches(self, max_batch_size: int = 1, max_seq_length: int = 2048, spec=False, draft_bugdet = 0, window_size = 32):
         self.max_length = max_seq_length
         self.batch_size = max_batch_size
         self.cachelens = torch.zeros(max_batch_size, dtype=torch.int32, device=self.device)
@@ -73,8 +73,12 @@ class LMBackend:
         def target_prefill_abstract(q, kv_cache):
             return torch.empty_like(q)
 
-        with torch.device(self.device):
-            self.model.setup_caches(num_pages=max_num_pages, page_size=page_size)
+        if spec:
+            with torch.device(self.device):
+                self.model.setup_caches(num_pages=max_num_pages, page_size=page_size, spec=spec, draft_num_pages = (draft_bugdet//page_size + 1)*max_batch_size, draft_bugdet = draft_bugdet, window_size = window_size)
+        else:
+            with torch.device(self.device):
+                self.model.setup_caches(num_pages=max_num_pages, page_size=page_size)
 
     def compile(self):
         import torch._dynamo.config
