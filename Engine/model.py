@@ -276,8 +276,11 @@ class Attention(nn.Module):
     
     def gen_draft_kv(self, q, k, v, bsz, seqlen, context_len):
         query_states = q.view(bsz, seqlen, self.n_head, self.head_dim).transpose(1,2)
-        key_states = k.reshape(bsz, self.max_num_pages_per_request, self.page_size, self.n_local_heads, self.head_dim).reshape(bsz, self.max_seqlen, self.n_local_heads, self.head_dim)[:,:context_len].transpose(1,2)
-        value_states = v.reshape(bsz, self.max_num_pages_per_request, self.page_size, self.n_local_heads, self.head_dim).reshape(bsz, self.max_seqlen, self.n_local_heads, self.head_dim)[:,:context_len].transpose(1,2)
+        page_size = 128
+        key_states = k.reshape(bsz, -1, page_size, self.n_local_heads, self.head_dim).reshape(bsz, -1, self.n_local_heads, self.head_dim)[:,:context_len].transpose(1,2)
+        value_states = v.reshape(bsz, -1, page_size, self.n_local_heads, self.head_dim).reshape(bsz, -1, self.n_local_heads, self.head_dim)[:, :context_len].transpose(1,2)
+
+        # TODO Can not repeat it
         key_states = repeat_kv(key_states, self.n_head//self.n_local_heads)
         value_states = repeat_kv(value_states, self.n_head//self.n_local_heads)
 
