@@ -16,6 +16,18 @@ def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
     hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
     return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
 
+def unrepeat_kv(repeated_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+    """
+    This function reverses the repeat_kv operation. It transforms the repeated tensor
+    back to its original shape: (batch, num_key_value_heads, seqlen, head_dim)
+    from (batch, num_attention_heads, seqlen, head_dim).
+    """
+    batch, num_attention_heads, slen, head_dim = repeated_states.shape
+    if n_rep == 1:
+        return repeated_states
+    num_key_value_heads = num_attention_heads // n_rep
+    return repeated_states.view(batch, num_key_value_heads, n_rep, slen, head_dim).mean(dim=2)
+
 torch.library.define(
     "mylib::update_kv",
     "(Tensor k, Tensor v, Tensor kv_append_indptr, Tensor(a!) kv_cache, Tensor kv_page_indices, Tensor kv_page_indptr, Tensor cachelen) -> ()",

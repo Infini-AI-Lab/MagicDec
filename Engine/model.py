@@ -7,7 +7,7 @@ from torch import Tensor
 from torch.nn import functional as F
 import torch.distributed as dist
 import math 
-from MagicDec.Engine.utils import repeat_kv
+from MagicDec.Engine.utils import repeat_kv, unrepeat_kv
 
 def find_multiple(n: int, k: int) -> int:
     if n % k == 0:
@@ -276,9 +276,8 @@ class Attention(nn.Module):
     
     def gen_draft_kv(self, q, k, v, bsz, seqlen, context_len):
         query_states = q.view(bsz, seqlen, self.n_head, self.head_dim).transpose(1,2)
-        page_size = 128
-        key_states = k.reshape(bsz, -1, page_size, self.n_local_heads, self.head_dim).reshape(bsz, -1, self.n_local_heads, self.head_dim)[:,:context_len].transpose(1,2)
-        value_states = v.reshape(bsz, -1, page_size, self.n_local_heads, self.head_dim).reshape(bsz, -1, self.n_local_heads, self.head_dim)[:, :context_len].transpose(1,2)
+        key_states = k.view(bsz, -1, self.n_local_heads, self.head_dim)[:,:context_len].transpose(1,2)
+        value_states = v.view(bsz, -1, self.n_local_heads, self.head_dim)[:, :context_len].transpose(1,2)
 
         # TODO Can not repeat it
         key_states = repeat_kv(key_states, self.n_head//self.n_local_heads)
@@ -309,6 +308,8 @@ class Attention(nn.Module):
         v_cur = value_states[:, :, -self.window_size:, :]
         key_states = torch.cat([k_past_compress, k_cur], dim = 2).transpose(1,2)
         value_states = torch.cat([v_past_compress, v_cur], dim = 2).transpose(1,2)
+        key_states = unrepeat_kv(key_states, self.n_head//self.n_local_heads).view(-1, self.n_local_heads, self.head_dim)
+        value_states = unrepeat_kv(value_states, self.n_head//self.n_local_heads).view(-1, self.n_local_heads, self.head_dim)
         # TODO Need to pass in the draft kv page information tensor to update the draft KV cache
         self.kv_cache.update_draft(key_states, value_states, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
 
