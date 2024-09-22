@@ -13,7 +13,7 @@ class LMBackend:
         self.cachelens = None
 
     def load_model(self, checkpoints: str, use_tp: bool, rank_group=None, group = None):
-        self.model: Transformer = load_model(checkpoint_path=checkpoints, device=self.device, precision=self.dtype, use_tp= use_tp, rank_group=rank_group, group = group)        
+        self.model: Transformer = load_model(checkpoint_path=checkpoints, device=self.device, precision=self.dtype, use_tp=use_tp, rank_group=rank_group, group=group)        
 
     @torch.inference_mode()
     def setup_caches(self, max_batch_size: int = 1, max_seq_length: int = 2048):
@@ -21,12 +21,12 @@ class LMBackend:
         self.batch_size = max_batch_size
         self.cachelens = torch.zeros(max_batch_size, dtype=torch.int32, device=self.device)
         # Prefill length should be devisible by 128 and plus 1
-        # Max Length should be divisible by 128 and batch size
+        # Max Length should be divisible by 128
         page_size = 128
         max_num_pages = max_batch_size * max_seq_length // page_size
         if max_num_pages*page_size < max_batch_size*max_seq_length:
             max_num_pages += max_batch_size
-        self.max_num_pages_per_request = max_num_pages // page_size
+        self.max_num_pages_per_request = max_num_pages // max_batch_size
         self.num_pages_per_request = torch.zeros(max_batch_size, device=self.device, dtype=torch.int32)
         self.page_size = 128
         self.max_num_pages = max_num_pages
@@ -40,10 +40,10 @@ class LMBackend:
         self.paged_kv_indices = torch.empty(max_num_pages, dtype=torch.int32, device=self.device)
         self.paged_kv_last_page_len = torch.zeros((max_batch_size), dtype=torch.int32, device=self.device)
         self.decode_wrapper = flashinfer.BatchPrefillWithPagedKVCacheWrapper(self.decode_buffer, "NHD", use_cuda_graph=True,
-                                                                              qo_indptr_buf=self.qo_indptr.clone(), 
-                                                                              paged_kv_indptr_buf=self.paged_kv_indptr.clone(), 
-                                                                              paged_kv_indices_buf=self.paged_kv_indices.clone(), 
-                                                                              paged_kv_last_page_len_buf=self.paged_kv_last_page_len.clone())
+                                                                              qo_indptr_buf=self.qo_indptr, 
+                                                                              paged_kv_indptr_buf=self.paged_kv_indptr, 
+                                                                              paged_kv_indices_buf=self.paged_kv_indices, 
+                                                                              paged_kv_last_page_len_buf=self.paged_kv_last_page_len)
         
         self.prefill_wrapper = flashinfer.BatchPrefillWithPagedKVCacheWrapper(self.prefill_buffer, "NHD")
 
@@ -88,19 +88,20 @@ class LMBackend:
     @torch.inference_mode()
     def inference(self, input_ids: torch.LongTensor, benchmark = False):
             dec_len = input_ids.shape[1]
-            self.pre_decode(dec_len=dec_len, benchmark=benchmark)
+            self.pre_decode(dec_len=dec_len)
             logits = self.model_forward(
                 model=self.model, 
-                x=input_ids.clone(),
-                input_pos=self.cachelens.clone(), 
+                x=input_ids,
+                input_pos=self.cachelens, 
                 kv_append_indptr = self.qo_indptr*dec_len, kv_page_indices = self.paged_kv_indices, kv_page_indptr= self.paged_kv_indptr, kv_page_lastlen = self.paged_kv_last_page_len)
-            if not benchmark:
-                self.cachelens += dec_len
+            self.cachelens += dec_len
+            if benchmark:
+                self.cachelens -= dec_len
+                self.paged_kv_last_page_len -= dec_len
             return logits
     
-    def pre_decode(self, dec_len, benchmark = False):
-            if not benchmark:
-                self.paged_kv_last_page_len += dec_len
+    def pre_decode(self, dec_len):
+            self.paged_kv_last_page_len += dec_len
             self.decode_wrapper.plan(
                 qo_indptr=self.qo_indptr*dec_len,
                 paged_kv_indptr=self.paged_kv_indptr,
@@ -111,15 +112,14 @@ class LMBackend:
                 head_dim=self.model.config.head_dim, 
                 page_size=self.page_size, 
                 q_data_type=self.dtype, 
-                causal=True
+                causal=True,
             )
     
     @torch.inference_mode()
-    def encode(self, input_ids: torch.LongTensor):
+    def encode(self, input_ids: torch.LongTensor, benchmark = False):
         self.clear_kv()
         logits = None
         seq_len = input_ids.shape[1]
-
         chunk_size = 128
         num_chunks = (seq_len + chunk_size - 1) // chunk_size  # Ceil division
         for i in range(num_chunks):
@@ -128,12 +128,13 @@ class LMBackend:
             chunk_input_ids = input_ids[:, start_idx:end_idx]
             dec_len = end_idx-start_idx
             self.pre_encode(dec_len=dec_len)
-            logits = self.prefill(
-                model=self.model,
-                x=chunk_input_ids,
-                input_pos=self.cachelens,
-                kv_append_indptr = self.qo_indptr*dec_len, kv_page_indices = self.paged_kv_indices, kv_page_indptr= self.paged_kv_indptr, kv_page_lastlen = self.paged_kv_last_page_len
-            )
+            if not benchmark:
+                logits = self.prefill(
+                    model=self.model,
+                    x=chunk_input_ids,
+                    input_pos=self.cachelens,
+                    kv_append_indptr = self.qo_indptr*dec_len, kv_page_indices = self.paged_kv_indices, kv_page_indptr= self.paged_kv_indptr, kv_page_lastlen = self.paged_kv_last_page_len
+                )
             self.cachelens += dec_len
         
         return logits
@@ -143,7 +144,7 @@ class LMBackend:
         qo_indptr = self.qo_indptr*dec_len
         self.paged_kv_indices = torch.cat([torch.arange(i * self.max_num_pages_per_request, i * self.max_num_pages_per_request + self.num_pages_per_request[i], dtype=torch.int32, device=self.device) for i in range(self.batch_size)])
         self.paged_kv_indptr[1:] = torch.cumsum(self.num_pages_per_request, dim=0, dtype=torch.int32)
-        self.paged_kv_last_page_len = torch.zeros((self.batch_size), dtype=torch.int32, device=self.device) + dec_len
+        self.paged_kv_last_page_len = torch.full((self.batch_size,), dec_len, dtype=torch.int32, device=self.device)
         self.prefill_wrapper.plan(
             qo_indptr=qo_indptr,
             paged_kv_indptr=self.paged_kv_indptr,

@@ -7,6 +7,7 @@ from torch import Tensor
 from torch.nn import functional as F
 import torch.distributed as dist
 import math 
+from MagicDec.Engine.utils import repeat_kv
 
 def find_multiple(n: int, k: int) -> int:
     if n % k == 0:
@@ -68,12 +69,15 @@ transformer_configs = {
 }
 
 class KVCache(nn.Module):
-    def __init__(self, max_num_pages, page_size, n_heads, head_dim, dtype=torch.bfloat16):
+    def __init__(self, max_num_pages, page_size, n_heads, head_dim, dtype=torch.bfloat16, spec=False, draft_max_num_pages=0):
         super().__init__()
         cache_shape = (max_num_pages, 2, page_size, n_heads, head_dim)
         self.register_buffer('kv_cache', torch.zeros(cache_shape, dtype=dtype))
+        if spec:
+            draft_shape = (draft_max_num_pages, 2, page_size, n_heads, head_dim)
+            self.register_buffer('draft_cache', torch.zeros(draft_shape, dtype=dtype))
         
-    def update(self, k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen):
+    def update_target(self, k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen):
         torch.ops.mylib.update_kv(
             k,
             v,
@@ -84,6 +88,18 @@ class KVCache(nn.Module):
             kv_page_lastlen,
         )
         return self.kv_cache
+    
+    def update_draft(self, k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen):
+        torch.ops.mylib.update_kv(
+            k,
+            v,
+            kv_append_indptr,
+            self.draft_cache,
+            kv_page_indices,
+            kv_page_indptr,
+            kv_page_lastlen,
+        )
+        return self.draft_cache
 
 class Transformer(nn.Module):
     def __init__(self, config: ModelArgs) -> None:
@@ -93,18 +109,25 @@ class Transformer(nn.Module):
         self.layers = nn.ModuleList(TransformerBlock(config) for _ in range(config.n_layer))
         self.norm = RMSNorm(config.dim, eps=config.norm_eps)
         self.output = nn.Linear(config.dim, config.vocab_size, bias=False)
-        self.freqs_cis: Optional[Tensor] = None
+        # self.freqs_cis: Optional[Tensor] = None
 
-    def setup_caches(self, num_pages, page_size):
+    def setup_caches(self, num_pages, page_size, spec=False, draft_num_pages = 0, draft_bugdet = 0, window_size = 32):
 
         head_dim = self.config.dim // self.config.n_head
         dtype = self.output.weight.dtype
 
         for b in self.layers:
-            b.attention.kv_cache = KVCache(num_pages, page_size, self.config.n_local_heads, head_dim, dtype)
+            b.attention.kv_cache = KVCache(num_pages, page_size, self.config.n_local_heads, head_dim, dtype, spec, draft_num_pages)
             b.attention.attn_decode = torch.ops.mylib.target_decode
             b.attention.attn_prefill = torch.ops.mylib.target_prefill
             b.attention.rope = torch.ops.mylib.llama31rope
+            if spec:
+                b.attention.attn_draft = torch.ops.mylib.draft_decode
+                b.attention.is_spec = True
+                b.attention.draft_budget = draft_bugdet
+                b.attention.windows_size = window_size
+                b.attention.pooling = 'avgpool'
+                b.attention.kernel_size = 5
 
         # if (self.config.high_freq_factor is not None) and (self.config.low_freq_factor is not None):
         #     self.freqs_cis = precompute_freqs_cis(self.config.block_size, self.config.dim // self.config.n_head, self.config.rope_base,dtype,
@@ -113,18 +136,26 @@ class Transformer(nn.Module):
         #     self.freqs_cis = precompute_freqs_cis(self.config.block_size, self.config.dim // self.config.n_head, self.config.rope_base,dtype,
         #                                           self.config.scaling_factor)
 
-    def forward(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
+    def target_forward(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
         x = self.tok_embeddings(idx)
         for i, layer in enumerate(self.layers):
             x = layer(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
         x = self.norm(x)
         logits = self.output(x)
         return logits
-
-    def prefill(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
+    
+    def draft_forward(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
         x = self.tok_embeddings(idx)
         for i, layer in enumerate(self.layers):
-            x = layer.prefill(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+            x = layer.draft_forward(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+        x = self.norm(x)
+        logits = self.output(x)
+        return logits
+
+    def prefill(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, is_last = False) -> Tensor:
+        x = self.tok_embeddings(idx)
+        for i, layer in enumerate(self.layers):
+            x = layer.prefill(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen, is_last)
         x = self.norm(x)
         logits = self.output(x)
         return logits
@@ -146,9 +177,14 @@ class TransformerBlock(nn.Module):
         h = x + self.attention(self.attention_norm(x), offsets, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
         out = h + self.feed_forward(self.ffn_norm(h))
         return out
+    
+    def draft_forward(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
+        h = x + self.attention.draft_forward(self.attention_norm(x), offsets, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+        out = h + self.feed_forward(self.ffn_norm(h))
+        return out
 
-    def prefill(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
-        h = x + self.attention.prefill(self.attention_norm(x), offsets, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+    def prefill(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, is_last = False) -> Tensor:
+        h = x + self.attention.prefill(self.attention_norm(x), offsets, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen, is_last = is_last)
         out = h + self.feed_forward(self.ffn_norm(h))
         return out
 
@@ -166,7 +202,14 @@ class Attention(nn.Module):
         self.process_group = None
         self.attn_decode = None
         self.attn_prefill = None
+        self.attn_draft = None
         self.rope = None
+        self.is_spec = False
+
+        self.window_size = None
+        self.pooling = None
+        self.kernel_size = None
+        self.draft_budget = None
 
         self.n_head = config.n_head
         self.head_dim = config.head_dim
@@ -189,15 +232,15 @@ class Attention(nn.Module):
         k = k.view(bsz * seqlen, self.n_local_heads, self.head_dim)
         v = v.contiguous().view(bsz * seqlen, self.n_local_heads, self.head_dim)
         q, k = self.rope(q, k, kv_append_indptr, offsets)
-        kv_cache = self.kv_cache.update(k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+        kv_cache = self.kv_cache.update_target(k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
         y = self.attn_decode(q, kv_cache)
         y = y.contiguous().view(bsz, seqlen, self.dim)
         y = self.wo(y)
         if self.process_group != None:
             dist.all_reduce(y)
         return y
-
-    def prefill(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
+    
+    def draft_forward(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
         bsz, seqlen, _ = x.shape
         kv_size = self.n_local_heads * self.head_dim
         q, k, v = self.wqkv(x).split([self.dim, kv_size, kv_size], dim=-1)
@@ -205,13 +248,67 @@ class Attention(nn.Module):
         k = k.view(bsz * seqlen, self.n_local_heads, self.head_dim)
         v = v.contiguous().view(bsz * seqlen, self.n_local_heads, self.head_dim)
         q, k = self.rope(q, k, kv_append_indptr, offsets)
-        kv_cache = self.kv_cache.update(k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
-        y = self.attn_prefill(q, kv_cache)
+        kv_cache = self.kv_cache.update_draft(k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+        y = self.attn_draft(q, kv_cache)
         y = y.contiguous().view(bsz, seqlen, self.dim)
         y = self.wo(y)
         if self.process_group != None:
             dist.all_reduce(y)
         return y
+
+    def prefill(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, is_last = False) -> Tensor:
+        bsz, seqlen, _ = x.shape
+        kv_size = self.n_local_heads * self.head_dim
+        q, k, v = self.wqkv(x).split([self.dim, kv_size, kv_size], dim=-1)
+        q = q.view(bsz * seqlen, self.n_head, self.head_dim)
+        k = k.view(bsz * seqlen, self.n_local_heads, self.head_dim)
+        v = v.contiguous().view(bsz * seqlen, self.n_local_heads, self.head_dim)
+        q, k = self.rope(q, k, kv_append_indptr, offsets)
+        kv_cache = self.kv_cache.update_target(k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+        y = self.attn_prefill(q, kv_cache)
+        if is_last and self.is_spec:
+            self.gen_draft_kv(q, kv_cache[:, 0], kv_cache[:, 1], bsz, seqlen, offsets[0]+seqlen)
+        y = y.contiguous().view(bsz, seqlen, self.dim)
+        y = self.wo(y)
+        if self.process_group != None:
+            dist.all_reduce(y)
+        return y
+    
+    def gen_draft_kv(self, q, k, v, bsz, seqlen, context_len):
+        query_states = q.view(bsz, seqlen, self.n_head, self.head_dim).transpose(1,2)
+        key_states = k.reshape(bsz, self.max_num_pages_per_request, self.page_size, self.n_local_heads, self.head_dim).reshape(bsz, self.max_seqlen, self.n_local_heads, self.head_dim)[:,:context_len].transpose(1,2)
+        value_states = v.reshape(bsz, self.max_num_pages_per_request, self.page_size, self.n_local_heads, self.head_dim).reshape(bsz, self.max_seqlen, self.n_local_heads, self.head_dim)[:,:context_len].transpose(1,2)
+        key_states = repeat_kv(key_states, self.n_head//self.n_local_heads)
+        value_states = repeat_kv(value_states, self.n_head//self.n_local_heads)
+
+        attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
+        mask = torch.full((self.window_size, self.window_size), torch.finfo(attn_weights.dtype).min, device=attn_weights.device)
+        mask_cond = torch.arange(mask.size(-1), device=attn_weights.device)
+        mask.masked_fill_(mask_cond < (mask_cond + 1).view(mask.size(-1), 1), 0)
+        mask = mask.to(attn_weights.device)
+        attention_mask = mask[None, None, :, :]
+
+        attn_weights[:, :, -self.window_size:, -self.window_size:] += attention_mask
+
+        attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+        attn_weights_sum = attn_weights[:, :, -self.window_size:, : -self.window_size].sum(dim = -2)
+        if self.pooling == 'avgpool':
+            attn_cache = F.avg_pool1d(attn_weights_sum, kernel_size = self.kernel_size, padding=self.kernel_size//2, stride=1)
+        elif self.pooling == 'maxpool':
+            attn_cache = F.max_pool1d(attn_weights_sum, kernel_size = self.kernel_size, padding=self.kernel_size//2, stride=1)
+        else:
+            raise ValueError('Pooling method not supported')
+        indices = attn_cache.topk(self.draft_budget - self.window_size, dim=-1).indices
+        indices = indices.unsqueeze(-1).expand(-1, -1, -1, self.head_dim)
+        k_past_compress = key_states[:, :, :-self.window_size, :].gather(dim = 2, index = indices)
+        v_past_compress = value_states[:, :, :-self.window_size, :].gather(dim = 2, index = indices)
+        k_cur = key_states[:, :, -self.window_size:, :]
+        v_cur = value_states[:, :, -self.window_size:, :]
+        key_states = torch.cat([k_past_compress, k_cur], dim = 2).transpose(1,2)
+        value_states = torch.cat([v_past_compress, v_cur], dim = 2).transpose(1,2)
+        # TODO Need to pass in the draft kv page information tensor to update the draft KV cache
+        self.kv_cache.update_draft(key_states, value_states, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+
 
 class FeedForward(nn.Module):
     def __init__(self, config: ModelArgs) -> None:
