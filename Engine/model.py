@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional
 
+from einops import rearrange
 import torch
 import torch.nn as nn
 from torch import Tensor
@@ -125,7 +126,7 @@ class Transformer(nn.Module):
                 b.attention.attn_draft = torch.ops.mylib.draft_decode
                 b.attention.is_spec = True
                 b.attention.draft_budget = draft_bugdet
-                b.attention.windows_size = window_size
+                b.attention.window_size = window_size
                 b.attention.pooling = 'avgpool'
                 b.attention.kernel_size = 5
 
@@ -152,10 +153,10 @@ class Transformer(nn.Module):
         logits = self.output(x)
         return logits
 
-    def prefill(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, is_last = False) -> Tensor:
+    def prefill(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, is_last = False, draft_paged_kv_indptr=None, draft_paged_kv_indices=None, draft_paged_kv_last_page_len=None) -> Tensor:
         x = self.tok_embeddings(idx)
         for i, layer in enumerate(self.layers):
-            x = layer.prefill(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen, is_last)
+            x = layer.prefill(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen, is_last, draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len)
         x = self.norm(x)
         logits = self.output(x)
         return logits
@@ -183,8 +184,8 @@ class TransformerBlock(nn.Module):
         out = h + self.feed_forward(self.ffn_norm(h))
         return out
 
-    def prefill(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, is_last = False) -> Tensor:
-        h = x + self.attention.prefill(self.attention_norm(x), offsets, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen, is_last = is_last)
+    def prefill(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, is_last = False, draft_paged_kv_indptr=None, draft_paged_kv_indices=None, draft_paged_kv_last_page_len=None) -> Tensor:
+        h = x + self.attention.prefill(self.attention_norm(x), offsets, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen, is_last, draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len)
         out = h + self.feed_forward(self.ffn_norm(h))
         return out
 
@@ -256,7 +257,7 @@ class Attention(nn.Module):
             dist.all_reduce(y)
         return y
 
-    def prefill(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, is_last = False) -> Tensor:
+    def prefill(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, is_last = False ,draft_paged_kv_indptr=None, draft_paged_kv_indices=None, draft_paged_kv_last_page_len=None) -> Tensor:
         bsz, seqlen, _ = x.shape
         kv_size = self.n_local_heads * self.head_dim
         q, k, v = self.wqkv(x).split([self.dim, kv_size, kv_size], dim=-1)
@@ -267,51 +268,113 @@ class Attention(nn.Module):
         kv_cache = self.kv_cache.update_target(k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
         y = self.attn_prefill(q, kv_cache)
         if is_last and self.is_spec:
-            self.gen_draft_kv(q, kv_cache[:, 0], kv_cache[:, 1], bsz, seqlen, offsets[0]+seqlen)
+            self.gen_draft_kv(q, kv_cache[:, 0], kv_cache[:, 1], bsz, seqlen, offsets[0]+seqlen, kv_append_indptr/seqlen*self.draft_budget, draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len)
         y = y.contiguous().view(bsz, seqlen, self.dim)
         y = self.wo(y)
         if self.process_group != None:
             dist.all_reduce(y)
         return y
     
-    def gen_draft_kv(self, q, k, v, bsz, seqlen, context_len):
-        query_states = q.view(bsz, seqlen, self.n_head, self.head_dim).transpose(1,2)
-        key_states = k.view(bsz, -1, self.n_local_heads, self.head_dim)[:,:context_len].transpose(1,2)
-        value_states = v.view(bsz, -1, self.n_local_heads, self.head_dim)[:, :context_len].transpose(1,2)
+    def gen_draft_kv(self, q, k, v, bsz, seqlen, context_len, kv_append_indptr, draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len):
+        query_states = q.reshape(bsz, seqlen, self.n_head, self.head_dim).transpose(1,2)
+        key_states = k.reshape(bsz, -1, self.n_local_heads, self.head_dim)[:,:context_len].transpose(1,2)
+        value_states = v.reshape(bsz, -1, self.n_local_heads, self.head_dim)[:, :context_len].transpose(1,2)
 
-        # TODO Can not repeat it
-        key_states = repeat_kv(key_states, self.n_head//self.n_local_heads)
-        value_states = repeat_kv(value_states, self.n_head//self.n_local_heads)
+        # TODO Can not repeat keys and values for memory crunch
+        nrepeat = self.n_head // self.n_local_heads
+        query_states = rearrange(query_states, 'b (h r) l d -> b h (r l) d', r=nrepeat).contiguous()
+        
+        B, H, L, D = query_states.shape
+        topk = self.draft_budget - self.window_size
+        topk_indices = torch.zeros(B, H, L, topk, device=query_states.device, dtype=torch.int64)
 
-        attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
-        mask = torch.full((self.window_size, self.window_size), torch.finfo(attn_weights.dtype).min, device=attn_weights.device)
-        mask_cond = torch.arange(mask.size(-1), device=attn_weights.device)
+        mask = torch.full((self.window_size, self.window_size), torch.finfo(query_states.dtype).min, device=query_states.device)
+        mask_cond = torch.arange(mask.size(-1), device=query_states.device)
         mask.masked_fill_(mask_cond < (mask_cond + 1).view(mask.size(-1), 1), 0)
-        mask = mask.to(attn_weights.device)
-        attention_mask = mask[None, None, :, :]
+        mask = mask.to(query_states.device)
 
-        attn_weights[:, :, -self.window_size:, -self.window_size:] += attention_mask
+        window_size = self.window_size
+        chunk_size = 32
+        assert chunk_size % nrepeat == 0
+        num_chunks = (L + chunk_size - 1) // chunk_size
+        key_states = []
+        value_states = []
+        for chunk_id in range(num_chunks):
+            start_idx = chunk_id * chunk_size
+            end_idx = min(start_idx + chunk_size, L)
+            chunk_query_states = query_states[:, :, start_idx:end_idx, :]
+            attn_weights = torch.einsum('b h i d, b h j d -> b h i j', chunk_query_states, key_states)
+            attn_weights[:, :, -window_size:, -window_size:] += mask
 
-        attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
-        attn_weights_sum = attn_weights[:, :, -self.window_size:, : -self.window_size].sum(dim = -2)
-        if self.pooling == 'avgpool':
-            attn_cache = F.avg_pool1d(attn_weights_sum, kernel_size = self.kernel_size, padding=self.kernel_size//2, stride=1)
-        elif self.pooling == 'maxpool':
-            attn_cache = F.max_pool1d(attn_weights_sum, kernel_size = self.kernel_size, padding=self.kernel_size//2, stride=1)
-        else:
-            raise ValueError('Pooling method not supported')
-        indices = attn_cache.topk(self.draft_budget - self.window_size, dim=-1).indices
-        indices = indices.unsqueeze(-1).expand(-1, -1, -1, self.head_dim)
-        k_past_compress = key_states[:, :, :-self.window_size, :].gather(dim = 2, index = indices)
-        v_past_compress = value_states[:, :, :-self.window_size, :].gather(dim = 2, index = indices)
-        k_cur = key_states[:, :, -self.window_size:, :]
-        v_cur = value_states[:, :, -self.window_size:, :]
-        key_states = torch.cat([k_past_compress, k_cur], dim = 2).transpose(1,2)
-        value_states = torch.cat([v_past_compress, v_cur], dim = 2).transpose(1,2)
-        key_states = unrepeat_kv(key_states, self.n_head//self.n_local_heads).view(-1, self.n_local_heads, self.head_dim)
-        value_states = unrepeat_kv(value_states, self.n_head//self.n_local_heads).view(-1, self.n_local_heads, self.head_dim)
-        # TODO Need to pass in the draft kv page information tensor to update the draft KV cache
-        self.kv_cache.update_draft(key_states, value_states, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+            attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+            attn_weights_sum = attn_weights[:, :, -window_size:, : -window_size].sum(dim = -2)
+            if self.pooling == 'avgpool':
+                attn_cache = F.avg_pool1d(attn_weights_sum, kernel_size = self.kernel_size, padding=self.kernel_size//2, stride=1)
+            elif self.pooling == 'maxpool':
+                attn_cache = F.max_pool1d(attn_weights_sum, kernel_size = self.kernel_size, padding=self.kernel_size//2, stride=1)
+            else:
+                raise ValueError('Pooling method not supported')
+        
+            # avg across each kv group
+            attn_cache = rearrange(attn_cache, 'b h (r l) s -> b h r l s', r=nrepeat)
+            attn_cache = attn_cache.sum(dim=2)
+
+            indices = attn_cache.topk(topk, dim=-1).indices
+            indices = indices.unsqueeze(-1).expand(-1, -1, -1, self.head_dim)
+            k_past_compress = key_states[:, :, :-self.window_size, :].gather(dim = 2, index = indices)
+            v_past_compress = value_states[:, :, :-self.window_size, :].gather(dim = 2, index = indices)
+            k_cur = key_states[:, :, -window_size:, :]
+            v_cur = value_states[:, :, -window_size:, :]
+            chunk_key_states = torch.cat([k_past_compress, k_cur], dim = 2).transpose(1,2)
+            chunk_value_states = torch.cat([v_past_compress, v_cur], dim = 2).transpose(1,2)
+            key_states.append(chunk_key_states)
+            value_states.append(chunk_value_states)
+        key_states = torch.cat(key_states, dim = 2)
+        value_states = torch.cat(value_states, dim = 2)
+        import time
+        self.kv_cache.update_draft(key_states, value_states, kv_append_indptr, draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len)
+        print(key_states.shape, value_states.shape)
+        time.sleep(1000)
+        # query_states = q.reshape(bsz, seqlen, self.n_head, self.head_dim).transpose(1,2)
+        # key_states = k.reshape(bsz, -1, self.n_local_heads, self.head_dim)[:,:context_len].transpose(1,2)
+        # value_states = v.reshape(bsz, -1, self.n_local_heads, self.head_dim)[:, :context_len].transpose(1,2)
+
+        # # TODO Can not repeat it
+        # key_states = repeat_kv(key_states, self.n_head//self.n_local_heads)
+        # value_states = repeat_kv(value_states, self.n_head//self.n_local_heads)
+
+        # attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
+        # mask = torch.full((self.window_size, self.window_size), torch.finfo(attn_weights.dtype).min, device=attn_weights.device)
+        # mask_cond = torch.arange(mask.size(-1), device=attn_weights.device)
+        # mask.masked_fill_(mask_cond < (mask_cond + 1).view(mask.size(-1), 1), 0)
+        # mask = mask.to(attn_weights.device)
+        # attention_mask = mask[None, None, :, :]
+
+        # attn_weights[:, :, -self.window_size:, -self.window_size:] += attention_mask
+
+        # attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+        # attn_weights_sum = attn_weights[:, :, -self.window_size:, : -self.window_size].sum(dim = -2)
+        # if self.pooling == 'avgpool':
+        #     attn_cache = F.avg_pool1d(attn_weights_sum, kernel_size = self.kernel_size, padding=self.kernel_size//2, stride=1)
+        # elif self.pooling == 'maxpool':
+        #     attn_cache = F.max_pool1d(attn_weights_sum, kernel_size = self.kernel_size, padding=self.kernel_size//2, stride=1)
+        # else:
+        #     raise ValueError('Pooling method not supported')
+        # indices = attn_cache.topk(self.draft_budget - self.window_size, dim=-1).indices
+        # indices = indices.unsqueeze(-1).expand(-1, -1, -1, self.head_dim)
+        # k_past_compress = key_states[:, :, :-self.window_size, :].gather(dim = 2, index = indices)
+        # v_past_compress = value_states[:, :, :-self.window_size, :].gather(dim = 2, index = indices)
+        # k_cur = key_states[:, :, -self.window_size:, :]
+        # v_cur = value_states[:, :, -self.window_size:, :]
+        # key_states = torch.cat([k_past_compress, k_cur], dim = 2).transpose(1,2)
+        # value_states = torch.cat([v_past_compress, v_cur], dim = 2).transpose(1,2)
+        # key_states = unrepeat_kv(key_states, self.n_head//self.n_local_heads).view(-1, self.n_local_heads, self.head_dim)
+        # value_states = unrepeat_kv(value_states, self.n_head//self.n_local_heads).view(-1, self.n_local_heads, self.head_dim)
+        # # TODO Need to pass in the draft kv page information tensor to update the draft KV cache
+        # import time
+        # self.kv_cache.update_draft(key_states, value_states, kv_append_indptr, draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len)
+        # print(key_states.shape, value_states.shape)
+        # time.sleep(1000)
 
 
 class FeedForward(nn.Module):

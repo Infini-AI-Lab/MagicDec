@@ -11,19 +11,19 @@ from torch.utils.data.dataloader import DataLoader
 from tqdm import tqdm
 import argparse
 import contextlib
-from MagicDec.Engine.backend_selfspec import LMBackend
+from MagicDec.Engine.backend import LMBackend
 
 parser = argparse.ArgumentParser(description='Process model configuration and partitions.')
-parser.add_argument('--model', type=Path, default=Path("checkpoints/meta-llama/Llama-2-7b-hf/model.pth"), help='model')
-parser.add_argument('--model_name', type=str, default="meta-llama/Llama-2-7b-hf", help='model name')
-parser.add_argument('--streamingllm_budget', type=int, default=256, help='Dataset end index.')
+parser.add_argument('--model', type=Path, default=Path("../FlashSpec/checkpoints/meta-llama/Meta-Llama-3.1-8B/model.pth"), help='model')
+parser.add_argument('--model_name', type=str, default="meta-llama/Meta-Llama-3.1-8B", help='model name')
+parser.add_argument('--draft_budget', type=int, default=1025, help='Dataset end index.')
 parser.add_argument('--rank_group', nargs='+', type=int, help='Target group of ranks')
 parser.add_argument('--compile', action='store_true', help='Whether to compile the model.')
 
 parser.add_argument('--gamma', type=int, default=5, help='start')
 
 parser.add_argument('--B', type=int, default=1, help='Batch size.')
-parser.add_argument('--prefix_len', type=int, default=4000, help='Prefix length')
+parser.add_argument('--prefix_len', type=int, default=4128, help='Prefix length')
 parser.add_argument('--gen_len', type=int, default=64, help='Generate length')
 
 parser.add_argument('--seed', type=int, default=123, help='Random seed.')
@@ -48,22 +48,23 @@ if use_tp:
 
 setup_seed(args.seed)
 print(f"Using device={DEVICE}")
-MAX_LEN_TARGET = args.prefix_len + args.gen_len + args.gamma
+# MAX_LEN_TARGET = args.prefix_len + args.gen_len + args.gamma
+MAX_LEN_TARGET = 4224
 DTYPE = torch.bfloat16
 BATCH_SIZE = args.B
 benchmark = args.benchmark
 checkpoint_path = args.model
 
-target_dec_list = [args.gamma + 1]
+target_dec_len = args.gamma + 1
 draft_dec_list = [1,2]
 
 # Load target model
-engine = LMBackend(dtype=DTYPE, device=DEVICE, dec_list=target_dec_list, draft_dec_list=draft_dec_list)
+engine = LMBackend(dtype=DTYPE, device=DEVICE, dec_len=target_dec_len, draft_dec_list=draft_dec_list)
 engine.load_model(checkpoint_path, use_tp=use_tp, rank_group = args.rank_group, group=global_group)
 vocab_size = engine.model.config.vocab_size
 if args.compile:
     engine.compile()
-engine.setup_caches(max_batch_size=BATCH_SIZE, max_seq_length=MAX_LEN_TARGET, streamingllm_budget=args.streamingllm_budget, buffer=args.gen_len+args.gamma)
+engine.setup_caches(max_batch_size=BATCH_SIZE, max_seq_length=MAX_LEN_TARGET, spec=True, draft_bugdet=args.draft_budget, window_size=32)
 target_sample = cuda_graph_for_sampling_argmax_batch(device=DEVICE, dtype=DTYPE, batch_size=BATCH_SIZE, idx_len=args.gamma+1, dim=vocab_size)
 draft_sample = {}
 for i in [1, 2]:
@@ -106,6 +107,8 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
     num_nodes += input_ids.shape[1]
 
     logits = engine.encode(input_ids=input_ids)[:,-1]
+
+    #TODO Need further modification to manage the page table and cache_lens
     
     tokens_buffer[:,:1] = sampling_argmax_batch(logits=logits)
     
