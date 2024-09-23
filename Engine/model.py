@@ -112,7 +112,7 @@ class Transformer(nn.Module):
         self.output = nn.Linear(config.dim, config.vocab_size, bias=False)
         # self.freqs_cis: Optional[Tensor] = None
 
-    def setup_caches(self, num_pages, page_size, spec=False, draft_num_pages = 0, draft_bugdet = 0, window_size = 32):
+    def setup_caches(self, num_pages, page_size, spec=False, draft_num_pages = 0, draft_budget = 0, window_size = 32):
 
         head_dim = self.config.dim // self.config.n_head
         dtype = self.output.weight.dtype
@@ -125,7 +125,7 @@ class Transformer(nn.Module):
             if spec:
                 b.attention.attn_draft = torch.ops.mylib.draft_decode
                 b.attention.is_spec = True
-                b.attention.draft_budget = draft_bugdet
+                b.attention.draft_budget = draft_budget
                 b.attention.window_size = window_size
                 b.attention.pooling = 'avgpool'
                 b.attention.kernel_size = 5

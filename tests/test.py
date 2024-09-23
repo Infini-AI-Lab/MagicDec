@@ -48,7 +48,7 @@ llm = LMBackend(dtype=precision, device=device, dec_len=declen, draft_dec_list=[
 llm.load_model(checkpoint_path, use_tp=use_tp, rank_group=args.rank_group, group = global_group)
 if args.compile:
     llm.compile()
-llm.setup_caches(max_batch_size=max_batch_size, max_seq_length=max_seq_length, spec=True, draft_bugdet=1025)
+llm.setup_caches(max_batch_size=max_batch_size, max_seq_length=max_seq_length, spec=True, draft_budget=1025)
 
 prompt = torch.randint(low=3, high=30000, size=(max_batch_size, prefix_len), device=device)
 llm.encode(input_ids=prompt, benchmark=True)
