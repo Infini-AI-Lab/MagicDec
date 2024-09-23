@@ -112,23 +112,24 @@ class Transformer(nn.Module):
         self.output = nn.Linear(config.dim, config.vocab_size, bias=False)
         # self.freqs_cis: Optional[Tensor] = None
 
-    def setup_caches(self, num_pages, page_size, spec=False, draft_num_pages = 0, draft_budget = 0, window_size = 32):
+    def setup_caches(self, num_pages, page_size, spec=False, draft_num_pages = 0, draft_budget = 0, window_size = 32, non_snap_layers=0):
 
         head_dim = self.config.dim // self.config.n_head
         dtype = self.output.weight.dtype
 
-        for b in self.layers:
+        for i, b in enumerate(self.layers):
             b.attention.kv_cache = KVCache(num_pages, page_size, self.config.n_local_heads, head_dim, dtype, spec, draft_num_pages)
             b.attention.attn_decode = torch.ops.mylib.target_decode
             b.attention.attn_prefill = torch.ops.mylib.target_prefill
             b.attention.rope = torch.ops.mylib.llama31rope
-            if spec:
+            if spec and i >= non_snap_layers:
                 b.attention.attn_draft = torch.ops.mylib.draft_decode
                 b.attention.is_spec = True
                 b.attention.draft_budget = draft_budget
                 b.attention.window_size = window_size
                 b.attention.pooling = 'avgpool'
                 b.attention.kernel_size = 5
+        self.non_snap_layers = non_snap_layers
 
         # if (self.config.high_freq_factor is not None) and (self.config.low_freq_factor is not None):
         #     self.freqs_cis = precompute_freqs_cis(self.config.block_size, self.config.dim // self.config.n_head, self.config.rope_base,dtype,
@@ -145,10 +146,15 @@ class Transformer(nn.Module):
         logits = self.output(x)
         return logits
     
-    def draft_forward(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
+    def draft_forward(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, 
+                      draft_kv_page_indices: Tensor, draft_kv_page_indptr: Tensor, draft_kv_page_lastlen: Tensor,
+                      target_kv_page_indices: Tensor=None, target_kv_page_indptr: Tensor=None, target_kv_page_lastlen: Tensor=None) -> Tensor:
         x = self.tok_embeddings(idx)
         for i, layer in enumerate(self.layers):
-            x = layer.draft_forward(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+            if i <= self.non_snap_layers:
+                x = layer(x, input_pos, kv_append_indptr, target_kv_page_indices, target_kv_page_indptr, target_kv_page_lastlen)
+            else:
+                x = layer.draft_forward(x, input_pos, kv_append_indptr, draft_kv_page_indices, draft_kv_page_indptr, draft_kv_page_lastlen)
         x = self.norm(x)
         logits = self.output(x)
         return logits

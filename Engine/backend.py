@@ -17,7 +17,7 @@ class LMBackend:
             self.draft_cachelens = None
             self.draft_forward = {}
             for dec_len in draft_dec_list:
-                self.draft_forward[dec_len] = lambda model, x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen: model.draft_forward(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+                self.draft_forward[dec_len] = lambda model, x, input_pos, kv_append_indptr, draft_kv_page_indices, draft_kv_page_indptr, draft_kv_page_lastlen, target_kv_page_indices, target_kv_page_indptr, target_kv_page_lastlen: model.draft_forward(x, input_pos, kv_append_indptr, draft_kv_page_indices, draft_kv_page_indptr, draft_kv_page_lastlen, target_kv_page_indices, target_kv_page_indptr, target_kv_page_lastlen)
 
     def load_model(self, checkpoints: str, use_tp: bool, rank_group=None, group = None):
         self.model: Transformer = load_model(checkpoint_path=checkpoints, device=self.device, precision=self.dtype, use_tp=use_tp, rank_group=rank_group, group=group)        
@@ -89,6 +89,7 @@ class LMBackend:
             self.draft_paged_kv_indptr = torch.arange(max_batch_size+1, dtype=torch.int32, device=self.device)*(draft_budget//page_size + 1)
             self.draft_paged_kv_indices = torch.arange(self.draft_num_pages, dtype=torch.int32, device=self.device)
             self.draft_paged_kv_last_page_len = torch.ones((max_batch_size), dtype=torch.int32, device=self.device)
+            self.non_snap_draft_paged_kv_last_page_len = torch.ones((max_batch_size), dtype=torch.int32, device=self.device)
             self.draft_wrapper = flashinfer.BatchPrefillWithPagedKVCacheWrapper(self.draft_buffer, "NHD", use_cuda_graph=True,
                                                                                 qo_indptr_buf=self.qo_indptr, 
                                                                                 paged_kv_indptr_buf=self.draft_paged_kv_indptr, 
@@ -129,8 +130,8 @@ class LMBackend:
     @torch.inference_mode()
     def inference(self, input_ids: torch.LongTensor, benchmark = False):
             dec_len = input_ids.shape[1]
+            # import pdb; pdb.set_trace()
             self.pre_decode(dec_len=dec_len)
-
             logits = self.model_forward(
                 model=self.model, 
                 x=input_ids,
@@ -162,23 +163,30 @@ class LMBackend:
     @torch.inference_mode()
     def speculate(self, input_ids: torch.LongTensor, benchmark = False, cachelen_update = None):
             dec_len = input_ids.shape[1]
+            # import pdb; pdb.set_trace()
             self.pre_spec(dec_len=dec_len)
+            self.pre_non_snap_spec(dec_len=dec_len)    # for non-snap layers 
             logits = self.draft_forward[dec_len](
                 model=self.model, 
                 x=input_ids,
                 input_pos=self.draft_cachelens, 
-                kv_append_indptr = self.qo_indptr*dec_len, kv_page_indices = self.draft_paged_kv_indices, kv_page_indptr= self.draft_paged_kv_indptr, kv_page_lastlen = self.draft_paged_kv_last_page_len)
+                kv_append_indptr = self.qo_indptr*dec_len, 
+                draft_kv_page_indices = self.draft_paged_kv_indices, draft_kv_page_indptr= self.draft_paged_kv_indptr, draft_kv_page_lastlen = self.draft_paged_kv_last_page_len,
+                target_kv_page_indices = self.paged_kv_indices, target_kv_page_indptr= self.paged_kv_indptr, target_kv_page_lastlen = self.non_snap_draft_paged_kv_last_page_len)
+            
             # self.cachelens += dec_len
             if benchmark:
                 # If benchmarking the latency, don't update the cachelens and page table
                 self.draft_cachelens -= dec_len
                 self.draft_paged_kv_last_page_len -= dec_len
+                self.non_snap_draft_paged_kv_last_page_len -= dec_len
             else:
                 if cachelen_update == None:
                     self.draft_cachelens += dec_len
                 else:
                     self.draft_cachelens += cachelen_update.to(torch.int32)
                     self.draft_paged_kv_last_page_len = self.draft_paged_kv_last_page_len - dec_len + cachelen_update.to(torch.int32)
+                    self.non_snap_draft_paged_kv_last_page_len = self.non_snap_draft_paged_kv_last_page_len - dec_len + cachelen_update.to(torch.int32)
             return logits
     
     def pre_spec(self, dec_len):
@@ -196,6 +204,21 @@ class LMBackend:
                 causal=True,
             )
     
+    def pre_non_snap_spec(self, dec_len):
+        self.non_snap_draft_paged_kv_last_page_len += dec_len
+        self.decode_wrapper.plan(
+            qo_indptr=self.qo_indptr*dec_len,
+            paged_kv_indptr=self.paged_kv_indptr,
+            paged_kv_indices=self.paged_kv_indices,
+            paged_kv_last_page_len=self.non_snap_draft_paged_kv_last_page_len,
+            num_qo_heads=self.model.config.n_head, 
+            num_kv_heads=self.model.config.n_local_heads, 
+            head_dim=self.model.config.head_dim, 
+            page_size=self.page_size, 
+            q_data_type=self.dtype, 
+            causal=True,
+        )
+
     @torch.inference_mode()
     def encode(self, input_ids: torch.LongTensor, benchmark = False):
         self.clear_kv()
@@ -231,6 +254,7 @@ class LMBackend:
             self.cachelens += dec_len
 
         self.draft_cachelens.copy_(self.cachelens)
+        self.non_snap_draft_paged_kv_last_page_len.copy_(self.paged_kv_last_page_len)
         
         return logits
     

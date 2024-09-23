@@ -199,9 +199,11 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
 
         engine.draft_cachelens = engine.draft_cachelens - args.gamma
         engine.draft_paged_kv_last_page_len = engine.draft_paged_kv_last_page_len - args.gamma
+        engine.non_snap_draft_paged_kv_last_page_len = engine.non_snap_draft_paged_kv_last_page_len - args.gamma
         # engine.draft_cachelens += accept_nums.flatten()
         engine.draft_cachelens += limited_accept_nums.flatten().to(torch.int32)
         engine.draft_paged_kv_last_page_len += limited_accept_nums.flatten().to(torch.int32)
+        engine.non_snap_draft_paged_kv_last_page_len += limited_accept_nums.flatten().to(torch.int32)
         
         # Get the bonus tokens
         indices = accept_nums - 1
