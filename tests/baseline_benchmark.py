@@ -16,8 +16,8 @@ parser = argparse.ArgumentParser(description='Process model configuration and pa
 parser.add_argument('--model', type=Path, default=Path("../FlashSpec/checkpoints/meta-llama/Meta-Llama-3.1-8B/model.pth"), help='model')
 parser.add_argument('--model_name', type=str, default="meta-llama/Meta-Llama-3.1-8B", help='model name')
 
-parser.add_argument('--B', type=int, default=128, help='Batch size.')
-parser.add_argument('--prefix_len', type=int, default=1025, help='Prefix length')
+parser.add_argument('--B', type=int, default=8, help='Batch size.')
+parser.add_argument('--prefix_len', type=int, default=4000, help='Prefix length')
 parser.add_argument('--gen_len', type=int, default=128, help='Generate length')
 
 parser.add_argument('--seed', type=int, default=123, help='Random seed.')
@@ -39,15 +39,18 @@ if use_tp:
         print = lambda *args, **kwargs: None
 setup_seed(args.seed)
 print(f"Using device={DEVICE}")
-MAX_LEN = args.prefix_len + args.gen_len - 1
+# MAX_LEN = args.prefix_len + args.gen_len - 1
+MAX_LEN = 4096
 DTYPE = torch.bfloat16
 BATCH_SIZE = args.B
 checkpoint_path = args.model
-engine = LMBackend(dtype=DTYPE, device=DEVICE)
+# engine = LMBackend(dtype=DTYPE, device=DEVICE)
+engine = LMBackend(dtype=DTYPE, device=DEVICE, draft_dec_list=[1,2])
 engine.load_model(checkpoint_path, use_tp=use_tp, rank_group = args.rank_group, group=global_group)
 if args.compile:
     engine.compile()
-engine.setup_caches(max_batch_size=BATCH_SIZE, max_seq_length=MAX_LEN)
+# engine.setup_caches(max_batch_size=BATCH_SIZE, max_seq_length=MAX_LEN)
+engine.setup_caches(max_batch_size=BATCH_SIZE, max_seq_length=MAX_LEN, draft_budget=1025)
 
 tokenizer = AutoTokenizer.from_pretrained(args.model_name)
 tokenizer.pad_token = tokenizer.eos_token
@@ -71,11 +74,13 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
     logits = engine.encode(input_ids=input_ids)[:,-1]
     next_tokens = sampling_argmax_batch(logits=logits)
     output = torch.cat((output, next_tokens),dim=-1)
-    while output.size(1)<args.prefix_len + args.gen_len and terminate == False:
+    # while output.size(1)<args.prefix_len + args.gen_len and terminate == False:
+    while output.size(1)<MAX_LEN and terminate == False:
         input_ids=next_tokens.clone()
         torch.cuda.synchronize()
         t1 = time.perf_counter()
-        logits = engine.inference(input_ids=input_ids)[:, -1]
+        # logits = engine.inference(input_ids=input_ids)[:, -1]
+        logits = engine.speculate(input_ids=input_ids)[:, -1]
         torch.cuda.synchronize()
         t2=time.perf_counter()
         next_tokens = sampling_argmax_batch(logits=logits)

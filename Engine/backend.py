@@ -14,6 +14,7 @@ class LMBackend:
         self.is_spec = False
         if draft_dec_list != None:
             self.is_spec = True
+            self.draft_cachelens = None
             self.draft_forward = {}
             for dec_len in draft_dec_list:
                 self.draft_forward[dec_len] = lambda model, x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen: model.draft_forward(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
@@ -82,6 +83,7 @@ class LMBackend:
         # If using speculative decoding, init draft attention backend
         if self.is_spec:
             self.draft_budget = draft_budget
+            self.draft_cachelens = torch.zeros(max_batch_size, dtype=torch.int32, device=self.device)
             self.draft_buffer = torch.empty(128 * 1024 * 1024, dtype=torch.uint8, device=self.device)
             self.draft_num_pages = (draft_budget//page_size + 1)*max_batch_size
             self.draft_paged_kv_indptr = torch.arange(max_batch_size+1, dtype=torch.int32, device=self.device)*(draft_budget//page_size + 1)
@@ -128,14 +130,13 @@ class LMBackend:
     def inference(self, input_ids: torch.LongTensor, benchmark = False):
             dec_len = input_ids.shape[1]
             self.pre_decode(dec_len=dec_len)
-            if self.is_spec and not benchmark:
-                # The cachelens has been updated by draft speculation before.
-                 self.cachelens -= dec_len
+
             logits = self.model_forward(
                 model=self.model, 
                 x=input_ids,
                 input_pos=self.cachelens, 
                 kv_append_indptr = self.qo_indptr*dec_len, kv_page_indices = self.paged_kv_indices, kv_page_indptr= self.paged_kv_indptr, kv_page_lastlen = self.paged_kv_last_page_len)
+            
             self.cachelens += dec_len
             if benchmark:
                 # If benchmarking the latency, don't update the cachelens and page table
@@ -159,19 +160,25 @@ class LMBackend:
             )
     
     @torch.inference_mode()
-    def speculate(self, input_ids: torch.LongTensor, benchmark = False):
+    def speculate(self, input_ids: torch.LongTensor, benchmark = False, cachelen_update = None):
             dec_len = input_ids.shape[1]
             self.pre_spec(dec_len=dec_len)
             logits = self.draft_forward[dec_len](
                 model=self.model, 
                 x=input_ids,
-                input_pos=self.cachelens, 
+                input_pos=self.draft_cachelens, 
                 kv_append_indptr = self.qo_indptr*dec_len, kv_page_indices = self.draft_paged_kv_indices, kv_page_indptr= self.draft_paged_kv_indptr, kv_page_lastlen = self.draft_paged_kv_last_page_len)
-            self.cachelens += dec_len
+            # self.cachelens += dec_len
             if benchmark:
                 # If benchmarking the latency, don't update the cachelens and page table
-                self.cachelens -= dec_len
+                self.draft_cachelens -= dec_len
                 self.draft_paged_kv_last_page_len -= dec_len
+            else:
+                if cachelen_update == None:
+                    self.draft_cachelens += dec_len
+                else:
+                    self.draft_cachelens += cachelen_update.to(torch.int32)
+                    self.draft_paged_kv_last_page_len = self.draft_paged_kv_last_page_len - dec_len + cachelen_update.to(torch.int32)
             return logits
     
     def pre_spec(self, dec_len):
@@ -222,6 +229,8 @@ class LMBackend:
                     kv_append_indptr = self.qo_indptr*dec_len, kv_page_indices = self.paged_kv_indices, kv_page_indptr= self.paged_kv_indptr, kv_page_lastlen = self.paged_kv_last_page_len, 
                 )
             self.cachelens += dec_len
+
+        self.draft_cachelens.copy_(self.cachelens)
         
         return logits
     
@@ -256,6 +265,7 @@ class LMBackend:
         self.paged_kv_last_page_len = torch.zeros((self.batch_size), dtype=torch.int32, device=self.device)
         self.num_pages_per_request = torch.zeros(self.batch_size, device=self.device, dtype=torch.int32)
         if self.is_spec:
+            self.draft_cachelens.zero_()
             self.draft_paged_kv_indptr = torch.arange(self.batch_size+1, dtype=torch.int32, device=self.device)*(self.draft_budget//self.page_size + 1)
             self.draft_paged_kv_indices = torch.arange(self.draft_num_pages, dtype=torch.int32, device=self.device)
             self.draft_paged_kv_last_page_len = torch.ones((self.batch_size), dtype=torch.int32, device=self.device)
