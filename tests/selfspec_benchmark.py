@@ -64,7 +64,7 @@ engine.load_model(checkpoint_path, use_tp=use_tp, rank_group = args.rank_group, 
 vocab_size = engine.model.config.vocab_size
 if args.compile:
     engine.compile()
-engine.setup_caches(max_batch_size=BATCH_SIZE, max_seq_length=MAX_LEN_TARGET, spec=True, draft_bugdet=args.draft_budget, window_size=32)
+engine.setup_caches(max_batch_size=BATCH_SIZE, max_seq_length=MAX_LEN_TARGET, draft_bugdet=args.draft_budget, window_size=32)
 target_sample = cuda_graph_for_sampling_argmax_batch(device=DEVICE, dtype=DTYPE, batch_size=BATCH_SIZE, idx_len=args.gamma+1, dim=vocab_size)
 draft_sample = {}
 for i in [1, 2]:
