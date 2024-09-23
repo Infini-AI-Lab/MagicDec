@@ -21,10 +21,11 @@ class LMBackend:
 
     @torch.inference_mode()
     def setup_caches(self, max_batch_size: int = 1, max_seq_length: int = 2048, spec=False, draft_bugdet = 0, window_size = 32):
+        self.is_spec = spec
         self.max_length = max_seq_length
         self.batch_size = max_batch_size
         self.cachelens = torch.zeros(max_batch_size, dtype=torch.int32, device=self.device)
-        # Prefill length should be devisible by 128 and plus 1
+        # Prefill length should be devisible by 128 and plus 1 or window_size
         # Max Length should be divisible by 128
         page_size = 128
         max_num_pages = max_batch_size * max_seq_length // page_size
@@ -34,7 +35,6 @@ class LMBackend:
         self.num_pages_per_request = torch.zeros(max_batch_size, device=self.device, dtype=torch.int32)
         self.page_size = 128
         self.max_num_pages = max_num_pages
-        self.is_spec = spec
 
 
         # Init Target Attention Backend(Flashinfer)
@@ -53,31 +53,6 @@ class LMBackend:
                                                                               paged_kv_last_page_len_buf=self.paged_kv_last_page_len)
         
         self.prefill_wrapper = flashinfer.BatchPrefillWithPagedKVCacheWrapper(self.prefill_buffer, "NHD")
-
-        if spec:
-            self.draft_num_pages = (draft_bugdet//page_size + 1)*max_batch_size
-            self.draft_paged_kv_indptr = torch.arange(max_batch_size+1, dtype=torch.int32, device=self.device)
-            self.draft_paged_kv_indices = torch.arange(self.draft_num_pages, dtype=torch.int32, device=self.device)
-            self.draft_paged_kv_last_page_len = torch.ones((max_batch_size), dtype=torch.int32, device=self.device)
-            self.draft_wrapper = flashinfer.BatchPrefillWithPagedKVCacheWrapper(self.draft_buffer, "NHD", use_cuda_graph=True,
-                                                                                qo_indptr_buf=self.qo_indptr, 
-                                                                                paged_kv_indptr_buf=self.draft_paged_kv_indptr, 
-                                                                                paged_kv_indices_buf=self.draft_paged_kv_indices, 
-                                                                                paged_kv_last_page_len_buf=self.draft_paged_kv_last_page_len)
-            
-            torch.library.define(
-                "mylib::draft_decode",
-                "(Tensor q, Tensor kv_cache) -> Tensor",
-            )
-            @torch.library.impl("mylib::draft_decode", "cuda")
-            def draft_decode(q, kv_cache):
-                return self.draft_wrapper.run(
-                    q, kv_cache
-                )
-            @torch.library.register_fake("mylib::draft_decode")
-            def draft_decode_abstract(q, kv_cache):
-                return torch.empty_like(q)
-
         torch.library.define(
             "mylib::target_decode",
             "(Tensor q, Tensor kv_cache) -> Tensor",
@@ -104,6 +79,30 @@ class LMBackend:
         def target_prefill_abstract(q, kv_cache):
             return torch.empty_like(q)
 
+        # If using speculative decoding, init draft attention backend
+        if spec:
+            self.draft_num_pages = (draft_bugdet//page_size + 1)*max_batch_size
+            self.draft_paged_kv_indptr = torch.arange(max_batch_size+1, dtype=torch.int32, device=self.device)
+            self.draft_paged_kv_indices = torch.arange(self.draft_num_pages, dtype=torch.int32, device=self.device)
+            self.draft_paged_kv_last_page_len = torch.ones((max_batch_size), dtype=torch.int32, device=self.device)
+            self.draft_wrapper = flashinfer.BatchPrefillWithPagedKVCacheWrapper(self.draft_buffer, "NHD", use_cuda_graph=True,
+                                                                                qo_indptr_buf=self.qo_indptr, 
+                                                                                paged_kv_indptr_buf=self.draft_paged_kv_indptr, 
+                                                                                paged_kv_indices_buf=self.draft_paged_kv_indices, 
+                                                                                paged_kv_last_page_len_buf=self.draft_paged_kv_last_page_len)
+            torch.library.define(
+                "mylib::draft_decode",
+                "(Tensor q, Tensor kv_cache) -> Tensor",
+            )
+            @torch.library.impl("mylib::draft_decode", "cuda")
+            def draft_decode(q, kv_cache):
+                return self.draft_wrapper.run(
+                    q, kv_cache
+                )
+            @torch.library.register_fake("mylib::draft_decode")
+            def draft_decode_abstract(q, kv_cache):
+                return torch.empty_like(q)
+
         if spec:
             with torch.device(self.device):
                 self.model.setup_caches(num_pages=max_num_pages, page_size=page_size, spec=spec, draft_num_pages = self.draft_num_pages, draft_bugdet = draft_bugdet, window_size = window_size)
@@ -126,7 +125,8 @@ class LMBackend:
     def inference(self, input_ids: torch.LongTensor, benchmark = False):
             dec_len = input_ids.shape[1]
             self.pre_decode(dec_len=dec_len)
-            if self.is_spec:
+            if self.is_spec and not benchmark:
+                # The cachelens has been updated by draft speculation before.
                  self.cachelens -= dec_len
             logits = self.model_forward(
                 model=self.model, 
@@ -135,6 +135,7 @@ class LMBackend:
                 kv_append_indptr = self.qo_indptr*dec_len, kv_page_indices = self.paged_kv_indices, kv_page_indptr= self.paged_kv_indptr, kv_page_lastlen = self.paged_kv_last_page_len)
             self.cachelens += dec_len
             if benchmark:
+                # If benchmarking the latency, don't update the cachelens and page table
                 self.cachelens -= dec_len
                 self.paged_kv_last_page_len -= dec_len
             return logits
@@ -162,11 +163,12 @@ class LMBackend:
                 model=self.model, 
                 x=input_ids,
                 input_pos=self.cachelens, 
-                kv_append_indptr = self.qo_indptr*dec_len, kv_page_indices = self.paged_kv_indices, kv_page_indptr= self.paged_kv_indptr, kv_page_lastlen = self.paged_kv_last_page_len)
+                kv_append_indptr = self.qo_indptr*dec_len, kv_page_indices = self.draft_paged_kv_indices, kv_page_indptr= self.draft_paged_kv_indptr, kv_page_lastlen = self.draft_paged_kv_last_page_len)
             self.cachelens += dec_len
             if benchmark:
+                # If benchmarking the latency, don't update the cachelens and page table
                 self.cachelens -= dec_len
-                self.paged_kv_last_page_len -= dec_len
+                self.draft_paged_kv_last_page_len -= dec_len
             return logits
     
     def pre_spec(self, dec_len):

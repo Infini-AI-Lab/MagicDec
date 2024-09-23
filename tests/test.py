@@ -44,18 +44,17 @@ declen = args.declen
 warm_up = 10
 T = args.T
 
-llm = LMBackend(dtype=precision, device=device, dec_len=declen)
+llm = LMBackend(dtype=precision, device=device, dec_len=declen, draft_dec_list=[1,2])
 llm.load_model(checkpoint_path, use_tp=use_tp, rank_group=args.rank_group, group = global_group)
 if args.compile:
     llm.compile()
-llm.setup_caches(max_batch_size=max_batch_size, max_seq_length=max_seq_length)
+llm.setup_caches(max_batch_size=max_batch_size, max_seq_length=max_seq_length, spec=True, draft_bugdet=1025)
 
 prompt = torch.randint(low=3, high=30000, size=(max_batch_size, prefix_len), device=device)
 llm.encode(input_ids=prompt, benchmark=True)
 
 profile = args.profile
 
-total_time = 0.0
 if (not profile) or (use_tp and rank != 0):
     prof = contextlib.nullcontext()
 else:
@@ -63,25 +62,58 @@ else:
     prof = torch.profiler.profile()
 
 with torch.inference_mode():
-        for _ in range(warm_up):
-            dec = torch.randint(low=3, high=30000, size=(max_batch_size, declen), device=device)
-            logits = llm.inference(input_ids=dec, benchmark=True)
-        for _ in range(T):
-            dec = torch.randint(low=3, high=30000, size=(max_batch_size, declen), device=device)
-            torch.cuda.synchronize()
-            t1 = time.perf_counter()
-            logits = llm.inference(input_ids=dec, benchmark=True)
-            torch.cuda.synchronize()
-            t2 = time.perf_counter()
-            total_time += t2 - t1
-print("Batch Size:{}, Max Length :{}, Decode Length :{}, Prefix Length :{}, inference time:{}s".format(max_batch_size, max_seq_length, declen, prefix_len, total_time / T))
-torch.cuda.synchronize()
-with prof:
-    llm.inference(input_ids=dec, benchmark=True)
-    llm.inference(input_ids=dec, benchmark=True)
-    llm.inference(input_ids=dec, benchmark=True)
-if hasattr(prof, "export_chrome_trace"):
-        if use_tp:
-            prof.export_chrome_trace(f"{profile}_rank_{rank}.json")
-        else:
-            prof.export_chrome_trace(f"{profile}.json")
+    # Benchmark Target Verification Time
+    total_time = 0.0
+    for _ in range(warm_up):
+        dec = torch.randint(low=3, high=30000, size=(max_batch_size, declen), device=device)
+        logits = llm.inference(input_ids=dec, benchmark=True)
+    for _ in range(T):
+        dec = torch.randint(low=3, high=30000, size=(max_batch_size, declen), device=device)
+        torch.cuda.synchronize()
+        t1 = time.perf_counter()
+        logits = llm.inference(input_ids=dec, benchmark=True)
+        torch.cuda.synchronize()
+        t2 = time.perf_counter()
+        total_time += t2 - t1
+    print("Batch Size:{}, Max Length :{}, Decode Length :{}, Prefix Length :{}, inference time:{}s".format(max_batch_size, max_seq_length, declen, prefix_len, total_time / T))
+
+    # Benchmark Draft Decode One Token Time
+    total_time = 0.0
+    for _ in range(warm_up):
+        dec = torch.randint(low=3, high=30000, size=(max_batch_size, 1), device=device)
+        logits = llm.speculate(input_ids=dec, benchmark=True)
+    for _ in range(T):
+        dec = torch.randint(low=3, high=30000, size=(max_batch_size, 1), device=device)
+        torch.cuda.synchronize()
+        t1 = time.perf_counter()
+        logits = llm.speculate(input_ids=dec, benchmark=True)
+        torch.cuda.synchronize()
+        t2 = time.perf_counter()
+        total_time += t2 - t1
+    print("Batch Size:{}, Max Length :{}, Decode Length :{}, Prefix Length :{}, inference time:{}s".format(max_batch_size, max_seq_length, 1, prefix_len, total_time / T))
+
+    # Benchmark Draft Decode Two Token Time
+    total_time = 0.0
+    for _ in range(warm_up):
+        dec = torch.randint(low=3, high=30000, size=(max_batch_size, 2), device=device)
+        logits = llm.speculate(input_ids=dec, benchmark=True)
+    for _ in range(T):
+        dec = torch.randint(low=3, high=30000, size=(max_batch_size, 2), device=device)
+        torch.cuda.synchronize()
+        t1 = time.perf_counter()
+        logits = llm.speculate(input_ids=dec, benchmark=True)
+        torch.cuda.synchronize()
+        t2 = time.perf_counter()
+        total_time += t2 - t1
+    print("Batch Size:{}, Max Length :{}, Decode Length :{}, Prefix Length :{}, inference time:{}s".format(max_batch_size, max_seq_length, 2, prefix_len, total_time / T))
+
+# torch.cuda.synchronize()
+# with prof:
+#     llm.inference(input_ids=dec, benchmark=True)
+#     llm.inference(input_ids=dec, benchmark=True)
+#     llm.inference(input_ids=dec, benchmark=True)
+# if hasattr(prof, "export_chrome_trace"):
+#         if use_tp:
+#             prof.export_chrome_trace(f"{profile}_rank_{rank}.json")
+#         else:
+#             prof.export_chrome_trace(f"{profile}.json")

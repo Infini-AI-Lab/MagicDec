@@ -137,7 +137,7 @@ class Transformer(nn.Module):
         #     self.freqs_cis = precompute_freqs_cis(self.config.block_size, self.config.dim // self.config.n_head, self.config.rope_base,dtype,
         #                                           self.config.scaling_factor)
 
-    def target_forward(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
+    def forward(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
         x = self.tok_embeddings(idx)
         for i, layer in enumerate(self.layers):
             x = layer(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
@@ -276,6 +276,7 @@ class Attention(nn.Module):
         return y
     
     def gen_draft_kv(self, q, k, v, bsz, seqlen, context_len, kv_append_indptr, draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len):
+        return
         query_states = q.reshape(bsz, seqlen, self.n_head, self.head_dim).transpose(1,2)
         key_states = k.reshape(bsz, -1, self.n_local_heads, self.head_dim)[:,:context_len].transpose(1,2)
         value_states = v.reshape(bsz, -1, self.n_local_heads, self.head_dim)[:, :context_len].transpose(1,2)
