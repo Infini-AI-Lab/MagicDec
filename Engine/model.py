@@ -268,7 +268,7 @@ class Attention(nn.Module):
         kv_cache = self.kv_cache.update_target(k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
         y = self.attn_prefill(q, kv_cache)
         if is_last and self.is_spec:
-            self.gen_draft_kv(q, kv_cache[:, 0], kv_cache[:, 1], bsz, seqlen, offsets[0]+seqlen, kv_append_indptr/seqlen*self.draft_budget, draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len)
+            self.gen_draft_kv(q, kv_cache[:, 0], kv_cache[:, 1], bsz, seqlen, offsets[0]+seqlen, (kv_append_indptr/seqlen*self.draft_budget).to(torch.int32), draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len)
         y = y.contiguous().view(bsz, seqlen, self.dim)
         y = self.wo(y)
         if self.process_group != None:
@@ -276,6 +276,9 @@ class Attention(nn.Module):
         return y
     
     def gen_draft_kv(self, q, k, v, bsz, seqlen, context_len, kv_append_indptr, draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len):
+        draft_key_states = torch.randn(bsz*self.draft_budget, k.shape[2], k.shape[3], dtype=torch.bfloat16, device=q.device)
+        draft_value_states = torch.randn(bsz*self.draft_budget, k.shape[2], k.shape[3], dtype=torch.bfloat16, device=q.device)
+        self.kv_cache.update_draft(draft_key_states, draft_value_states, kv_append_indptr, draft_paged_kv_indices, draft_paged_kv_indptr, draft_paged_kv_last_page_len)
         return
         query_states = q.reshape(bsz, seqlen, self.n_head, self.head_dim).transpose(1,2)
         key_states = k.reshape(bsz, -1, self.n_local_heads, self.head_dim)[:,:context_len].transpose(1,2)

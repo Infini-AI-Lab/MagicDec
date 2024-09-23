@@ -82,7 +82,7 @@ class LMBackend:
         # If using speculative decoding, init draft attention backend
         if spec:
             self.draft_num_pages = (draft_bugdet//page_size + 1)*max_batch_size
-            self.draft_paged_kv_indptr = torch.arange(max_batch_size+1, dtype=torch.int32, device=self.device)
+            self.draft_paged_kv_indptr = torch.arange(max_batch_size+1, dtype=torch.int32, device=self.device)*(draft_bugdet//page_size + 1)
             self.draft_paged_kv_indices = torch.arange(self.draft_num_pages, dtype=torch.int32, device=self.device)
             self.draft_paged_kv_last_page_len = torch.ones((max_batch_size), dtype=torch.int32, device=self.device)
             self.draft_wrapper = flashinfer.BatchPrefillWithPagedKVCacheWrapper(self.draft_buffer, "NHD", use_cuda_graph=True,
@@ -202,22 +202,22 @@ class LMBackend:
             if dec_len != chunk_size:
                 is_last = True
             self.pre_encode(dec_len=dec_len)                
-            if not benchmark:
-                if self.is_spec and is_last:
-                    logits = self.prefill(
-                        model=self.model,
-                        x=chunk_input_ids,
-                        input_pos=self.cachelens,
-                        kv_append_indptr = self.qo_indptr*dec_len, kv_page_indices = self.paged_kv_indices, kv_page_indptr= self.paged_kv_indptr, kv_page_lastlen = self.paged_kv_last_page_len, 
-                        is_last=is_last, draft_paged_kv_indptr=self.draft_paged_kv_indptr, draft_paged_kv_indices=self.draft_paged_kv_indices, draft_paged_kv_last_page_len=self.draft_paged_kv_last_page_len
-                    )
-                else:
-                    logits = self.prefill(
-                        model=self.model,
-                        x=chunk_input_ids,
-                        input_pos=self.cachelens,
-                        kv_append_indptr = self.qo_indptr*dec_len, kv_page_indices = self.paged_kv_indices, kv_page_indptr= self.paged_kv_indptr, kv_page_lastlen = self.paged_kv_last_page_len, 
-                    )
+            # if not benchmark:
+            if self.is_spec and is_last:
+                logits = self.prefill(
+                    model=self.model,
+                    x=chunk_input_ids,
+                    input_pos=self.cachelens,
+                    kv_append_indptr = self.qo_indptr*dec_len, kv_page_indices = self.paged_kv_indices, kv_page_indptr= self.paged_kv_indptr, kv_page_lastlen = self.paged_kv_last_page_len, 
+                    is_last=is_last, draft_paged_kv_indptr=self.draft_paged_kv_indptr, draft_paged_kv_indices=self.draft_paged_kv_indices, draft_paged_kv_last_page_len=self.draft_paged_kv_last_page_len
+                )
+            else:
+                logits = self.prefill(
+                    model=self.model,
+                    x=chunk_input_ids,
+                    input_pos=self.cachelens,
+                    kv_append_indptr = self.qo_indptr*dec_len, kv_page_indices = self.paged_kv_indices, kv_page_indptr= self.paged_kv_indptr, kv_page_lastlen = self.paged_kv_last_page_len, 
+                )
             self.cachelens += dec_len
         
         return logits
@@ -253,8 +253,6 @@ class LMBackend:
         self.paged_kv_last_page_len = torch.zeros((self.batch_size), dtype=torch.int32, device=self.device)
         self.num_pages_per_request = torch.zeros(self.batch_size, device=self.device, dtype=torch.int32)
         if self.is_spec:
-            self.draft_paged_kv_indptr = torch.arange(self.batch_size+1, dtype=torch.int32, device=self.device)
-            self.draft_paged_kv_indices = torch.arange(self.draft_num_pages, dtype=torch.int32, device=self.device)
             self.draft_paged_kv_last_page_len = torch.ones((self.batch_size), dtype=torch.int32, device=self.device)
 
     
