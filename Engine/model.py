@@ -275,70 +275,8 @@ class Attention(nn.Module):
             dist.all_reduce(y)
         return y
     
+    '''
     def gen_draft_kv(self, q, k, v, bsz, seqlen, context_len, kv_append_indptr, draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len):
-        # draft_key_states = torch.randn(bsz*self.draft_budget, k.shape[2], k.shape[3], dtype=torch.bfloat16, device=q.device)
-        # draft_value_states = torch.randn(bsz*self.draft_budget, k.shape[2], k.shape[3], dtype=torch.bfloat16, device=q.device)
-        # self.kv_cache.update_draft(draft_key_states, draft_value_states, kv_append_indptr, draft_paged_kv_indices, draft_paged_kv_indptr, draft_paged_kv_last_page_len)
-        # return
-        # query_states = q.reshape(bsz, seqlen, self.n_head, self.head_dim).transpose(1,2)
-        # key_states = k.reshape(bsz, -1, self.n_local_heads, self.head_dim)[:,:context_len].transpose(1,2)
-        # value_states = v.reshape(bsz, -1, self.n_local_heads, self.head_dim)[:, :context_len].transpose(1,2)
-
-        # # TODO Can not repeat keys and values for memory crunch
-        # nrepeat = self.n_head // self.n_local_heads
-        # query_states = rearrange(query_states, 'b (h r) l d -> b h (r l) d', r=nrepeat).contiguous()
-        
-        # B, H, L, D = query_states.shape
-        # topk = self.draft_budget - self.window_size
-        # topk_indices = torch.zeros(B, H, L, topk, device=query_states.device, dtype=torch.int64)
-
-        # mask = torch.full((self.window_size, self.window_size), torch.finfo(query_states.dtype).min, device=query_states.device)
-        # mask_cond = torch.arange(mask.size(-1), device=query_states.device)
-        # mask.masked_fill_(mask_cond < (mask_cond + 1).view(mask.size(-1), 1), 0)
-        # mask = mask.to(query_states.device)
-
-        # window_size = self.window_size
-        # chunk_size = 32
-        # assert chunk_size % nrepeat == 0
-        # num_chunks = (L + chunk_size - 1) // chunk_size
-        # key_states = []
-        # value_states = []
-        # for chunk_id in range(num_chunks):
-        #     start_idx = chunk_id * chunk_size
-        #     end_idx = min(start_idx + chunk_size, L)
-        #     chunk_query_states = query_states[:, :, start_idx:end_idx, :]
-        #     attn_weights = torch.einsum('b h i d, b h j d -> b h i j', chunk_query_states, key_states)
-        #     attn_weights[:, :, -window_size:, -window_size:] += mask
-
-        #     attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
-        #     attn_weights_sum = attn_weights[:, :, -window_size:, : -window_size].sum(dim = -2)
-        #     if self.pooling == 'avgpool':
-        #         attn_cache = F.avg_pool1d(attn_weights_sum, kernel_size = self.kernel_size, padding=self.kernel_size//2, stride=1)
-        #     elif self.pooling == 'maxpool':
-        #         attn_cache = F.max_pool1d(attn_weights_sum, kernel_size = self.kernel_size, padding=self.kernel_size//2, stride=1)
-        #     else:
-        #         raise ValueError('Pooling method not supported')
-        
-        #     # avg across each kv group
-        #     attn_cache = rearrange(attn_cache, 'b h (r l) s -> b h r l s', r=nrepeat)
-        #     attn_cache = attn_cache.sum(dim=2)
-
-        #     indices = attn_cache.topk(topk, dim=-1).indices
-        #     indices = indices.unsqueeze(-1).expand(-1, -1, -1, self.head_dim)
-        #     k_past_compress = key_states[:, :, :-self.window_size, :].gather(dim = 2, index = indices)
-        #     v_past_compress = value_states[:, :, :-self.window_size, :].gather(dim = 2, index = indices)
-        #     k_cur = key_states[:, :, -window_size:, :]
-        #     v_cur = value_states[:, :, -window_size:, :]
-        #     chunk_key_states = torch.cat([k_past_compress, k_cur], dim = 2).transpose(1,2)
-        #     chunk_value_states = torch.cat([v_past_compress, v_cur], dim = 2).transpose(1,2)
-        #     key_states.append(chunk_key_states)
-        #     value_states.append(chunk_value_states)
-        # key_states = torch.cat(key_states, dim = 2)
-        # value_states = torch.cat(value_states, dim = 2)
-        # import time
-        # self.kv_cache.update_draft(key_states, value_states, kv_append_indptr, draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len)
-        # print(key_states.shape, value_states.shape)
-        # time.sleep(1000)
         num_pages_per_request = k.shape[0] // bsz
         full_query_states = q.reshape(bsz, seqlen, self.n_head, self.head_dim).transpose(1,2)
         full_key_states = torch.empty((bsz, self.draft_budget, self.n_local_heads, self.head_dim), dtype=k.dtype, device=k.device)
@@ -349,10 +287,9 @@ class Attention(nn.Module):
             query_states = full_query_states[i].unsqueeze(0)
 
             # TODO Can not repeat it
-            key_states = repeat_kv(key_states, self.n_head//self.n_local_heads)
-            value_states = repeat_kv(value_states, self.n_head//self.n_local_heads)
-
-            attn_weights = torch.matmul(query_states, key_states.transpose(2, 3)) / math.sqrt(self.head_dim)
+            key_states_expanded = repeat_kv(key_states, self.n_head//self.n_local_heads)
+            
+            attn_weights = torch.matmul(query_states, key_states_expanded.transpose(2, 3)) / math.sqrt(self.head_dim)
             mask = torch.full((self.window_size, self.window_size), torch.finfo(attn_weights.dtype).min, device=attn_weights.device)
             mask_cond = torch.arange(mask.size(-1), device=attn_weights.device)
             mask.masked_fill_(mask_cond < (mask_cond + 1).view(mask.size(-1), 1), 0)
@@ -368,6 +305,9 @@ class Attention(nn.Module):
                 attn_cache = F.max_pool1d(attn_weights_sum, kernel_size = self.kernel_size, padding=self.kernel_size//2, stride=1)
             else:
                 raise ValueError('Pooling method not supported')
+            
+            attn_cache = rearrange(attn_cache, 'b (h r) l -> b h r l', h = self.n_local_heads).sum(dim=2)
+
             indices = attn_cache.topk(self.draft_budget - self.window_size, dim=-1).indices
             indices = indices.unsqueeze(-1).expand(-1, -1, -1, self.head_dim)
             k_past_compress = key_states[:, :, :-self.window_size, :].gather(dim = 2, index = indices)
@@ -376,10 +316,10 @@ class Attention(nn.Module):
             v_cur = value_states[:, :, -self.window_size:, :]
             key_states = torch.cat([k_past_compress, k_cur], dim = 2)
             value_states = torch.cat([v_past_compress, v_cur], dim = 2)
-
-            full_key_states[i] = unrepeat_kv(key_states, self.n_head//self.n_local_heads).transpose(1,2).view(self.draft_budget, self.n_local_heads, self.head_dim)
-            full_value_states[i] = unrepeat_kv(value_states, self.n_head//self.n_local_heads).transpose(1,2).view(self.draft_budget, self.n_local_heads, self.head_dim)
-
+            
+            full_key_states[i] = key_states.transpose(1,2)
+            full_value_states[i] = value_states.transpose(1,2)
+            
         full_key_states = full_key_states.view(-1, self.n_local_heads, self.head_dim)
         full_value_states = full_value_states.view(-1, self.n_local_heads, self.head_dim)
 
@@ -390,6 +330,64 @@ class Attention(nn.Module):
         self.kv_cache.update_draft(full_key_states, full_value_states, kv_append_indptr, draft_paged_kv_indices, draft_paged_kv_indptr, draft_paged_kv_last_page_len)
         # print(key_states.shape, value_states.shape)
         # time.sleep(1000)
+    '''
+
+    def gen_draft_kv(self, q, k, v, bsz, seqlen, context_len, kv_append_indptr, draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len):
+        num_pages_per_request = k.shape[0] // bsz
+        query_states = q.reshape(bsz, seqlen, self.n_head, self.head_dim).transpose(1,2)
+        key_states = k.reshape(bsz, -1, self.n_local_heads, self.head_dim)[:,:context_len].transpose(1,2).contiguous()
+        value_states = v.reshape(bsz, -1, self.n_local_heads, self.head_dim)[:,:context_len].transpose(1,2).contiguous()
+
+        nrepeat = self.n_head // self.n_local_heads
+        query_states = rearrange(query_states, 'b (h r) l d -> b h (r l) d', r=nrepeat).contiguous()
+
+        B, H, L, D = query_states.shape
+        topk = self.draft_budget - self.window_size
+        topk_indices = torch.zeros(B, H, L, topk, device=query_states.device, dtype=torch.int64)
+
+        mask = torch.full((self.window_size, self.window_size), torch.finfo(query_states.dtype).min, device=query_states.device)
+        mask_cond = torch.arange(mask.size(-1), device=query_states.device)
+        mask.masked_fill_(mask_cond < (mask_cond + 1).view(mask.size(-1), 1), 0)
+        mask = mask.to(query_states.device)
+
+        window_size = self.window_size
+        chunk_size = 32
+        assert chunk_size % nrepeat == 0
+        num_chunks = (L + chunk_size - 1) // chunk_size
+        attn_weights_sum = torch.zeros(bsz, self.n_head, context_len - window_size, device=query_states.device, dtype=query_states.dtype) 
+        for chunk_id in range(num_chunks):
+            start_idx = chunk_id * chunk_size
+            end_idx = min(start_idx + chunk_size, L)
+            chunk_query_states = query_states[:, :, start_idx:end_idx, :]
+            attn_weights = torch.einsum('b h i d, b h j d -> b h i j', chunk_query_states, key_states)
+            attn_weights[:, :, -window_size:, -window_size:] += mask
+
+            attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+            attn_weights = rearrange(attn_weights, 'b h (r l) s -> b (h r) l s', r=nrepeat)
+            attn_weights_sum += attn_weights[..., : -window_size].sum(dim = -2)
+
+
+        if self.pooling == 'avgpool':
+            attn_cache = F.avg_pool1d(attn_weights_sum, kernel_size = self.kernel_size, padding=self.kernel_size//2, stride=1)
+        elif self.pooling == 'maxpool':
+            attn_cache = F.max_pool1d(attn_weights_sum, kernel_size = self.kernel_size, padding=self.kernel_size//2, stride=1)
+        else:
+            raise ValueError('Pooling method not supported')
+    
+        # avg across each kv group
+        attn_cache = rearrange(attn_cache, 'b (h r) s -> b h r s', h = self.n_local_heads)
+        attn_cache = attn_cache.sum(dim=2)
+
+        indices = attn_cache.topk(topk, dim=-1).indices
+        indices = indices.unsqueeze(-1).expand(-1, -1, -1, self.head_dim)
+        k_past_compress = key_states[:, :, :-self.window_size, :].gather(dim = 2, index = indices)
+        v_past_compress = value_states[:, :, :-self.window_size, :].gather(dim = 2, index = indices)
+        k_cur = key_states[:, :, -window_size:, :]
+        v_cur = value_states[:, :, -window_size:, :]
+        new_key_states = torch.cat([k_past_compress, k_cur], dim = 2).transpose(1,2).contiguous().view(-1, self.n_local_heads, self.head_dim)
+        new_value_states = torch.cat([v_past_compress, v_cur], dim = 2).transpose(1,2).contiguous().view(-1, self.n_local_heads, self.head_dim)
+        self.kv_cache.update_draft(new_key_states, new_value_states, kv_append_indptr, draft_paged_kv_indices, draft_paged_kv_indptr, draft_paged_kv_last_page_len)
+
 
 
 class FeedForward(nn.Module):
