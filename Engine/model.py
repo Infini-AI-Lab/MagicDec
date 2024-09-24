@@ -8,7 +8,6 @@ from torch import Tensor
 from torch.nn import functional as F
 import torch.distributed as dist
 import math 
-from MagicDec.Engine.utils import repeat_kv, unrepeat_kv
 
 def find_multiple(n: int, k: int) -> int:
     if n % k == 0:
@@ -333,7 +332,6 @@ class Attention(nn.Module):
     '''
 
     def gen_draft_kv(self, q, k, v, bsz, seqlen, context_len, kv_append_indptr, draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len):
-        num_pages_per_request = k.shape[0] // bsz
         query_states = q.reshape(bsz, seqlen, self.n_head, self.head_dim).transpose(1,2)
         key_states = k.reshape(bsz, -1, self.n_local_heads, self.head_dim)[:,:context_len].transpose(1,2).contiguous()
         value_states = v.reshape(bsz, -1, self.n_local_heads, self.head_dim)[:,:context_len].transpose(1,2).contiguous()
@@ -343,7 +341,6 @@ class Attention(nn.Module):
 
         B, H, L, D = query_states.shape
         topk = self.draft_budget - self.window_size
-        topk_indices = torch.zeros(B, H, L, topk, device=query_states.device, dtype=torch.int64)
 
         mask = torch.full((self.window_size, self.window_size), torch.finfo(query_states.dtype).min, device=query_states.device)
         mask_cond = torch.arange(mask.size(-1), device=query_states.device)

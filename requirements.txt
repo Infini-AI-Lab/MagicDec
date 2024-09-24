@@ -6,3 +6,4 @@ datasets==2.16.1
 tiktoken
 packaging
 ninja
+einops

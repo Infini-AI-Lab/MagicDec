@@ -14,7 +14,7 @@ import contextlib
 from MagicDec.Engine.backend import LMBackend
 
 parser = argparse.ArgumentParser(description='Process model configuration and partitions.')
-parser.add_argument('--model', type=Path, default=Path("../FlashSpec/checkpoints/meta-llama/Meta-Llama-3.1-8B/model.pth"), help='model')
+parser.add_argument('--model', type=Path, default=Path("checkpoints/meta-llama/Meta-Llama-3.1-8B/model.pth"), help='model')
 parser.add_argument('--model_name', type=str, default="meta-llama/Meta-Llama-3.1-8B", help='model name')
 parser.add_argument('--draft_budget', type=int, default=4097, help='Dataset end index.')
 parser.add_argument('--rank_group', nargs='+', type=int, help='Target group of ranks')
@@ -221,9 +221,10 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
                 double_buffer = torch.zeros((BATCH_SIZE, 2), device=DEVICE).long()
                 mask = (accept_nums == (args.gamma + 1)).squeeze()
                 double_buffer[:, 0] = torch.where(mask, tokens_buffer[:, -1], bonus_tokens[:, 0])
-                double_buffer[:, 1] = torch.where(mask, bonus_tokens[:, 0], torch.zeros_like(bonus_tokens[:, 0]))
-                non_zero_mask = double_buffer != 0
+                double_buffer[:, 1] = torch.where(mask, bonus_tokens[:, 0], torch.zeros_like(bonus_tokens[:, 0] -1))
+                non_zero_mask = double_buffer != -1
                 cachelens_update = non_zero_mask.sum(dim=1).flatten()
+                double_buffer[:, 1] = torch.where(mask, bonus_tokens[:, 0], torch.zeros_like(bonus_tokens[:, 0]))
         
         if not terminal:
             if benchmark:
