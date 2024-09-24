@@ -103,7 +103,7 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
     terminal = False
     tokens_buffer= torch.zeros((BATCH_SIZE, args.gamma+1), device=DEVICE).long()
     # output = torch.zeros(BATCH_SIZE, args.prefix_len + args.gen_len + args.gamma + 1, device=DEVICE).long()
-    output = torch.zeros(BATCH_SIZE, MAX_LEN_TARGET, device=DEVICE).long()
+    output = torch.zeros(BATCH_SIZE, MAX_LEN_TARGET+args.gamma, device=DEVICE).long()
     output[:, :input_ids.shape[1]] = input_ids
     num_nodes = torch.zeros(BATCH_SIZE,device=DEVICE).long()
     num_nodes += input_ids.shape[1]
@@ -211,7 +211,8 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
         num_nodes += accept_nums.flatten()
 
         # Check Number of Nodes + Bonus Token <= max_target_token
-        if num_nodes.max() + 1 >= args.prefix_len + gen_len:
+        # if num_nodes.max() + 1 >= args.prefix_len + gen_len:
+        if num_nodes.max() + 1 >= MAX_LEN_TARGET - args.gamma:
             terminal = True
         # Put Bonus tokens to the tokens buffer, and prepare the variables for next itr
         if not terminal:
@@ -222,9 +223,8 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
                 mask = (accept_nums == (args.gamma + 1)).squeeze()
                 double_buffer[:, 0] = torch.where(mask, tokens_buffer[:, -1], bonus_tokens[:, 0])
                 double_buffer[:, 1] = torch.where(mask, bonus_tokens[:, 0], torch.zeros_like(bonus_tokens[:, 0] -1))
-                non_zero_mask = double_buffer != -1
-                cachelens_update = non_zero_mask.sum(dim=1).flatten()
-                double_buffer[:, 1] = torch.where(mask, bonus_tokens[:, 0], torch.zeros_like(bonus_tokens[:, 0]))
+                cachelens_update = (accept_nums == args.gamma + 1) + 1
+                cachelens_update = cachelens_update.flatten()
         
         if not terminal:
             if benchmark:
