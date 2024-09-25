@@ -10,7 +10,6 @@ from transformers import AutoTokenizer
 from torch.utils.data.dataloader import DataLoader
 from tqdm import tqdm
 import argparse
-import contextlib
 from MagicDec.Engine.backend import LMBackend
 
 parser = argparse.ArgumentParser(description='Process model configuration and partitions.')
@@ -25,15 +24,18 @@ parser.add_argument('--gamma', type=int, default=5, help='start')
 parser.add_argument('--B', type=int, default=8, help='Batch size.')
 parser.add_argument('--prefix_len', type=int, default=32032, help='Prefix length')
 parser.add_argument('--max_len', type=int, default=32128, help='Generate length')
+parser.add_argument('--window_size', type=int, default=32, help='Generate length')
 
 parser.add_argument('--seed', type=int, default=123, help='Random seed.')
 
 parser.add_argument('--printoutput', action='store_true', help='Whether to compile the model.')
 parser.add_argument('--benchmark', action='store_true', help='Whether to compile the model.')
 
-# Assert max length <= max context length
 args = parser.parse_args()
-# assert args.prefix_len + args.gen_len + args.gamma + 1 <= 4096
+assert args.prefix_len < args.max_len
+assert (args.prefix_len - args.window_size) % 128 == 0
+assert args.max_len % 128 == 0
+assert (args.draft_budget - 1) % 128 == 0
 
 # Init model parallelism
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -48,8 +50,7 @@ if use_tp:
 
 setup_seed(args.seed)
 print(f"Using device={DEVICE}")
-# MAX_LEN_TARGET = args.prefix_len + args.gen_len + args.gamma
-gen_len = 64
+
 MAX_LEN_TARGET = args.max_len
 DTYPE = torch.bfloat16
 BATCH_SIZE = args.B
@@ -57,19 +58,17 @@ benchmark = args.benchmark
 checkpoint_path = args.model
 
 target_dec_len = args.gamma + 1
-draft_dec_list = [1,2]
+draft_dec_len = 1
 
 # Load target model
-engine = LMBackend(dtype=DTYPE, device=DEVICE, dec_len=target_dec_len, draft_dec_list=draft_dec_list)
+engine = LMBackend(dtype=DTYPE, device=DEVICE, dec_len=target_dec_len, draft_dec_len=draft_dec_len)
 engine.load_model(checkpoint_path, use_tp=use_tp, rank_group = args.rank_group, group=global_group)
 vocab_size = engine.model.config.vocab_size
 if args.compile:
     engine.compile()
-engine.setup_caches(max_batch_size=BATCH_SIZE, max_seq_length=MAX_LEN_TARGET, draft_budget=args.draft_budget, window_size=32)
+engine.setup_caches(max_batch_size=BATCH_SIZE, max_seq_length=MAX_LEN_TARGET, draft_budget=args.draft_budget, window_size=args.window_size)
 target_sample = cuda_graph_for_sampling_argmax_batch(device=DEVICE, dtype=DTYPE, batch_size=BATCH_SIZE, idx_len=args.gamma+1, dim=vocab_size)
-draft_sample = {}
-for i in [1, 2]:
-    draft_sample[i] = cuda_graph_for_sampling_argmax_batch(device=DEVICE, dtype=DTYPE, batch_size=BATCH_SIZE, idx_len=i, dim=vocab_size)
+draft_sample = cuda_graph_for_sampling_argmax_batch(device=DEVICE, dtype=DTYPE, batch_size=BATCH_SIZE, idx_len=1, dim=vocab_size)
 
 # Load dataset
 tokenizer = AutoTokenizer.from_pretrained(args.model_name)
@@ -80,11 +79,10 @@ if tokenizer.unk_token_id is not None:
 else:
     eot_2 = tokenizer.encode("<|eot_id|>")[-1]
 print(f"eot_1: {eot_1}, eot_2: {eot_2}")
-repeats = 20
-no_runs = int(BATCH_SIZE*repeats)
-dataset = convert_pg19_dataset(tokenizer=tokenizer, seq_len=args.prefix_len) #, end=no_runs)
+
+dataset = convert_pg19_dataset(tokenizer=tokenizer, seq_len=args.prefix_len)
 dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, drop_last=True)
-num_eval_steps = min(10, len(dataloader))
+num_eval_steps = min(20, len(dataloader))
 
 total_time = 0.0
 num_gen_tokens = 0
@@ -94,57 +92,31 @@ if benchmark:
     target_time = 0.0
     verify_loop = 0.0
 
-prof = contextlib.nullcontext()
-
 for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
     if step >= num_eval_steps:
         break
     input_ids = batch[0].to(DEVICE)
     terminal = False
     tokens_buffer= torch.zeros((BATCH_SIZE, args.gamma+1), device=DEVICE).long()
-    # output = torch.zeros(BATCH_SIZE, args.prefix_len + args.gen_len + args.gamma + 1, device=DEVICE).long()
-    output = torch.zeros(BATCH_SIZE, MAX_LEN_TARGET+args.gamma, device=DEVICE).long()
+    output = torch.zeros(BATCH_SIZE, MAX_LEN_TARGET+1, device=DEVICE).long()
     output[:, :input_ids.shape[1]] = input_ids
     num_nodes = torch.zeros(BATCH_SIZE,device=DEVICE).long()
     num_nodes += input_ids.shape[1]
 
     logits = engine.encode(input_ids=input_ids)[:,-1]
-
-    #TODO Need further modification to manage the page table and cache_lens
-    
     tokens_buffer[:,:1] = sampling_argmax_batch(logits=logits)
-    
-    next_double = False
-    double_buffer = None
-    cachelens_update = None
 
     torch.cuda.synchronize()
     start = time.perf_counter()
     while terminal == False:
 
         # Draft speculation
-        if use_tp and (step == num_eval_steps - 1) and (rank == 0):
-            torch.profiler._utils._init_for_cuda_graphs()
-            prof = torch.profiler.profile()
-        else:
-            prof = contextlib.nullcontext()
-
         if benchmark:
             torch.cuda.synchronize()
             t1 = time.time()
 
-        with prof:    
-            for i in range(args.gamma):
-                if i == 0:
-                    if next_double:
-                        # The cachelens should increase 1 or 2
-                        next_tokens = draft_sample[2](engine.speculate(double_buffer, cachelen_update=cachelens_update))
-                        tokens_buffer[:,i+1:i+2] = next_tokens.gather(1, cachelens_update.view(-1,1) - 1)
-                        next_double = False
-                    else:
-                        tokens_buffer[:,i+1:i+2] = draft_sample[1](engine.speculate(tokens_buffer[:, i].view(-1,1)))
-                    continue
-                tokens_buffer[:,i+1:i+2] = draft_sample[1](engine.speculate(tokens_buffer[:, i].view(-1,1)))
+        for i in range(args.gamma):
+            tokens_buffer[:,i+1:i+2] = draft_sample(engine.speculate(tokens_buffer[:, i].view(-1,1)))
 
         if benchmark:
             torch.cuda.synchronize()
@@ -152,7 +124,7 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
             draft_time+=t2-t1
 
         # Target Verification
-        target_logits = engine.inference(tokens_buffer)
+        target_logits = engine.verify(tokens_buffer)
 
         if benchmark:
             torch.cuda.synchronize()
@@ -162,27 +134,30 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
         target_tokens = target_sample(target_logits)
         target_steps+=1
 
-    # Verify loop
-        bonus_tokens = torch.full((BATCH_SIZE, 1), 0, device=DEVICE).long()
-        accept_nums = torch.full((BATCH_SIZE, 1), 1, device=DEVICE).long()
-        accept_flags = torch.full((BATCH_SIZE, 1), True, device=DEVICE)
-        for pos in range(args.gamma):
-            target_token = target_tokens[:, pos]
-            draft_token = tokens_buffer[:, pos+1]
-            flag_accept = (target_token == draft_token).unsqueeze(1)
-            # Ensure flags remain False once they have been set to False
-            accept_flags = accept_flags & flag_accept
-            # Only increase accept_nums where accept_flags are still True
-            accept_nums += accept_flags.int()
-            # Wether or not terminate
-            condition = ((draft_token.unsqueeze(1) == eot_1) | (draft_token.unsqueeze(1) == eot_2)) & accept_flags
-            if condition.any():
-                terminal = True
-            accept_flags = accept_flags & ~condition
+    # Verification
+        # Vectorized Verify Loop
+        draft_tokens = tokens_buffer[:, 1:args.gamma+1]
+        flag_accept_matrix = (target_tokens[:, :args.gamma] == draft_tokens)  # shape: (BATCH_SIZE, gamma)
+        eot_condition = ((draft_tokens == eot_1) | (draft_tokens == eot_2))  # shape: (BATCH_SIZE, gamma)
+
+        # Compute accept_flags by considering both the acceptance condition and EOT tokens
+        accept_flags_int = (flag_accept_matrix & (~eot_condition)).int()
+        accept_flags_cumprod = torch.cumprod(accept_flags_int, dim=1)
+        accept_flags_matrix = accept_flags_cumprod.bool()
+
+        # Compute the number of accepted tokens
+        accept_nums = accept_flags_matrix.sum(dim=1, keepdim=True) + 1  # shape: (BATCH_SIZE, 1)
+
+        # Check for termination conditions
+        condition = (eot_condition & accept_flags_matrix).any(dim=1, keepdim=True)
+        if condition.any():
+            terminal = True
         
         # Rollback the memory length
         engine.cachelens = engine.cachelens - args.gamma - 1
         engine.paged_kv_last_page_len = engine.paged_kv_last_page_len - args.gamma - 1
+        engine.draft_cachelens = engine.draft_cachelens - args.gamma -1
+        engine.draft_paged_kv_last_page_len = engine.draft_paged_kv_last_page_len - args.gamma -1
 
         # Put the accepted tokens to output
         positions = torch.arange(output.shape[1], device=DEVICE).view(1, -1).repeat(BATCH_SIZE, 1)
@@ -194,14 +169,8 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
         # Set the cache length to the accepted length
         engine.cachelens += accept_nums.flatten().to(torch.int32)
         engine.paged_kv_last_page_len += accept_nums.flatten().to(torch.int32)
-        max_limit = torch.full_like(accept_nums, args.gamma, device = DEVICE)
-        limited_accept_nums = torch.min(accept_nums, max_limit)
-
-        engine.draft_cachelens = engine.draft_cachelens - args.gamma
-        engine.draft_paged_kv_last_page_len = engine.draft_paged_kv_last_page_len - args.gamma
-        # engine.draft_cachelens += accept_nums.flatten()
-        engine.draft_cachelens += limited_accept_nums.flatten().to(torch.int32)
-        engine.draft_paged_kv_last_page_len += limited_accept_nums.flatten().to(torch.int32)
+        engine.draft_cachelens += accept_nums.flatten().to(torch.int32)
+        engine.draft_paged_kv_last_page_len += accept_nums.flatten().to(torch.int32)
         
         # Get the bonus tokens
         indices = accept_nums - 1
@@ -212,19 +181,11 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
 
         # Check Number of Nodes + Bonus Token <= max_target_token
         # if num_nodes.max() + 1 >= args.prefix_len + gen_len:
-        if num_nodes.max() + 1 >= MAX_LEN_TARGET - args.gamma:
+        if num_nodes.max() + 1 + args.gamma > MAX_LEN_TARGET:
             terminal = True
         # Put Bonus tokens to the tokens buffer, and prepare the variables for next itr
         if not terminal:
             tokens_buffer[:, :1] = bonus_tokens
-            if accept_nums.max() == args.gamma + 1:
-                next_double = True
-                double_buffer = torch.zeros((BATCH_SIZE, 2), device=DEVICE).long()
-                mask = (accept_nums == (args.gamma + 1)).squeeze()
-                double_buffer[:, 0] = torch.where(mask, tokens_buffer[:, -1], bonus_tokens[:, 0])
-                double_buffer[:, 1] = torch.where(mask, bonus_tokens[:, 0], torch.zeros_like(bonus_tokens[:, 0] -1))
-                cachelens_update = (accept_nums == args.gamma + 1) + 1
-                cachelens_update = cachelens_update.flatten()
         
         if not terminal:
             if benchmark:
@@ -243,7 +204,7 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
     torch.cuda.synchronize()
     end=time.perf_counter()
     total_time += end-start
-    num_gen_tokens += (num_nodes.sum() - (input_ids.shape[1]+1)*BATCH_SIZE)
+    num_gen_tokens += (num_nodes.sum() - (input_ids.shape[1] + 1) * BATCH_SIZE)
     if args.printoutput:
         for i in range(BATCH_SIZE):
             print(tokenizer.decode(output[i, args.prefix_len:num_nodes[i]]))
@@ -260,6 +221,3 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
             verify_loop = 0.0
     if use_tp:
         dist.barrier()
-
-if hasattr(prof, "export_chrome_trace"):
-    prof.export_chrome_trace(f"prof_selfspec.json")

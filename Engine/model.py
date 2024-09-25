@@ -144,6 +144,14 @@ class Transformer(nn.Module):
         logits = self.output(x)
         return logits
     
+    def verify(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, draft_kv_page_indices: Tensor, draft_kv_page_indptr: Tensor, draft_kv_page_lastlen: Tensor) -> Tensor:
+        x = self.tok_embeddings(idx)
+        for i, layer in enumerate(self.layers):
+            x = layer.verify(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen, draft_kv_page_indices, draft_kv_page_indptr, draft_kv_page_lastlen)
+        x = self.norm(x)
+        logits = self.output(x)
+        return logits
+    
     def draft_forward(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
         x = self.tok_embeddings(idx)
         for i, layer in enumerate(self.layers):
@@ -175,6 +183,11 @@ class TransformerBlock(nn.Module):
 
     def forward(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
         h = x + self.attention(self.attention_norm(x), offsets, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+        out = h + self.feed_forward(self.ffn_norm(h))
+        return out
+    
+    def verify(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, draft_kv_page_indices: Tensor, draft_kv_page_indptr: Tensor, draft_kv_page_lastlen: Tensor) -> Tensor:
+        h = x + self.attention.verify(self.attention_norm(x), offsets, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen, draft_kv_page_indices, draft_kv_page_indptr, draft_kv_page_lastlen)
         out = h + self.feed_forward(self.ffn_norm(h))
         return out
     
@@ -233,6 +246,23 @@ class Attention(nn.Module):
         v = v.contiguous().view(bsz * seqlen, self.n_local_heads, self.head_dim)
         q, k = self.rope(q, k, kv_append_indptr, offsets)
         kv_cache = self.kv_cache.update_target(k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+        y = self.attn_decode(q, kv_cache)
+        y = y.contiguous().view(bsz, seqlen, self.dim)
+        y = self.wo(y)
+        if self.process_group != None:
+            dist.all_reduce(y)
+        return y
+    
+    def verify(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, draft_kv_page_indices: Tensor, draft_kv_page_indptr: Tensor, draft_kv_page_lastlen: Tensor) -> Tensor:
+        bsz, seqlen, _ = x.shape
+        kv_size = self.n_local_heads * self.head_dim
+        q, k, v = self.wqkv(x).split([self.dim, kv_size, kv_size], dim=-1)
+        q = q.view(bsz * seqlen, self.n_head, self.head_dim)
+        k = k.view(bsz * seqlen, self.n_local_heads, self.head_dim)
+        v = v.contiguous().view(bsz * seqlen, self.n_local_heads, self.head_dim)
+        q, k = self.rope(q, k, kv_append_indptr, offsets)
+        kv_cache = self.kv_cache.update_target(k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+        self.kv_cache.update_draft(k, v, kv_append_indptr, draft_kv_page_indices, draft_kv_page_indptr, draft_kv_page_lastlen)
         y = self.attn_decode(q, kv_cache)
         y = y.contiguous().view(bsz, seqlen, self.dim)
         y = self.wo(y)
