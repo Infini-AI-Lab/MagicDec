@@ -1,5 +1,3 @@
-export CUDA_VISIBLE_DEVICES=6,7,8,9
-
 model=meta-llama/Meta-Llama-3.1-8B
 
 TASKS=(
@@ -49,11 +47,11 @@ for task_id in {0..12}; do
     echo "TASK: ${TASK}"
     echo "gen_len: ${gen_len}"
 
-    # torchrun --standalone --nproc_per_node=1 \
-    python3    tests/selfspec_benchmark.py \
+    torchrun --standalone --nproc_per_node=1 \
+    tests/selfspec_benchmark.py \
         --model /scratch/checkpoints/${model}/model.pth --model_name ${model} \
-        --draft_budget ${draft_budget} --rank_group -1 \
+        --draft_budget ${draft_budget} --rank_group 0 \
         --gamma ${gamma} --B ${bsz} --prefix_len ${prefill} --max_len ${max_len} \
-        --printoutput --benchmark --dataset ruler:cwe 
+        --printoutput --benchmark --dataset ruler:${TASK} 
     # -compile
 done
