@@ -110,11 +110,15 @@ class Transformer(nn.Module):
         self.layers = nn.ModuleList(TransformerBlock(config) for _ in range(config.n_layer))
         self.norm = RMSNorm(config.dim, eps=config.norm_eps)
         self.output = nn.Linear(config.dim, config.vocab_size, bias=False)
+        self.world_size = None
+        self.rank = None
+        self.process_group = None
         # self.freqs_cis: Optional[Tensor] = None
 
     def setup_caches(self, num_pages, page_size, spec=False, draft_num_pages = 0, draft_budget = 0, window_size = 32):
 
         head_dim = self.config.dim // self.config.n_head
+        # dtype = self.output.weight.dtype
         dtype = self.output.weight.dtype if self.output.weight.dtype == torch.float16 else torch.bfloat16
 
         for b in self.layers:
@@ -143,7 +147,18 @@ class Transformer(nn.Module):
             x = layer(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
         x = self.norm(x)
         logits = self.output(x)
-        return logits
+        # return logits
+        if self.process_group != None:
+            all_max_value = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=logits.dtype, device=logits.device)
+            all_max_indices = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=torch.long, device=logits.device)
+            all_max_value[:, :, self.rank], all_max_indices[:, :, self.rank] = torch.max(logits, dim=-1)
+            all_max_indices[:, :, self.rank] += self.rank * logits.shape[-1]
+            dist.all_reduce(all_max_value)
+            dist.all_reduce(all_max_indices)
+            global_select_indices = torch.argmax(all_max_value, dim=-1)
+            global_indices = torch.gather(all_max_indices, dim=-1, index=global_select_indices.unsqueeze(-1))
+            return global_indices.squeeze(-1)
+        return torch.argmax(logits, dim=-1)
     
     def verify(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, draft_kv_page_indices: Tensor, draft_kv_page_indptr: Tensor, draft_kv_page_lastlen: Tensor) -> Tensor:
         x = self.tok_embeddings(idx)
@@ -151,7 +166,18 @@ class Transformer(nn.Module):
             x = layer.verify(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen, draft_kv_page_indices, draft_kv_page_indptr, draft_kv_page_lastlen)
         x = self.norm(x)
         logits = self.output(x)
-        return logits
+        # return logits
+        if self.process_group != None:
+            all_max_value = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=logits.dtype, device=logits.device)
+            all_max_indices = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=torch.long, device=logits.device)
+            all_max_value[:, :, self.rank], all_max_indices[:, :, self.rank] = torch.max(logits, dim=-1)
+            all_max_indices[:, :, self.rank] += self.rank * logits.shape[-1]
+            dist.all_reduce(all_max_value)
+            dist.all_reduce(all_max_indices)
+            global_select_indices = torch.argmax(all_max_value, dim=-1)
+            global_indices = torch.gather(all_max_indices, dim=-1, index=global_select_indices.unsqueeze(-1))
+            return global_indices.squeeze(-1)
+        return torch.argmax(logits, dim=-1)
     
     def draft_forward(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
         x = self.tok_embeddings(idx)
@@ -159,7 +185,18 @@ class Transformer(nn.Module):
             x = layer.draft_forward(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
         x = self.norm(x)
         logits = self.output(x)
-        return logits
+        # return logits
+        if self.process_group != None:
+            all_max_value = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=logits.dtype, device=logits.device)
+            all_max_indices = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=torch.long, device=logits.device)
+            all_max_value[:, :, self.rank], all_max_indices[:, :, self.rank] = torch.max(logits, dim=-1)
+            all_max_indices[:, :, self.rank] += self.rank * logits.shape[-1]
+            dist.all_reduce(all_max_value)
+            dist.all_reduce(all_max_indices)
+            global_select_indices = torch.argmax(all_max_value, dim=-1)
+            global_indices = torch.gather(all_max_indices, dim=-1, index=global_select_indices.unsqueeze(-1))
+            return global_indices.squeeze(-1)
+        return torch.argmax(logits, dim=-1)
 
     def prefill(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, is_last = False, draft_paged_kv_indptr=None, draft_paged_kv_indices=None, draft_paged_kv_last_page_len=None) -> Tensor:
         x = self.tok_embeddings(idx)
@@ -167,7 +204,18 @@ class Transformer(nn.Module):
             x = layer.prefill(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen, is_last, draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len)
         x = self.norm(x)
         logits = self.output(x)
-        return logits
+        # return logits
+        if self.process_group != None:
+            all_max_value = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=logits.dtype, device=logits.device)
+            all_max_indices = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=torch.long, device=logits.device)
+            all_max_value[:, :, self.rank], all_max_indices[:, :, self.rank] = torch.max(logits, dim=-1)
+            all_max_indices[:, :, self.rank] += self.rank * logits.shape[-1]
+            dist.all_reduce(all_max_value)
+            dist.all_reduce(all_max_indices)
+            global_select_indices = torch.argmax(all_max_value, dim=-1)
+            global_indices = torch.gather(all_max_indices, dim=-1, index=global_select_indices.unsqueeze(-1))
+            return global_indices.squeeze(-1)
+        return torch.argmax(logits, dim=-1)
 
     @classmethod
     def from_name(cls, name: str):

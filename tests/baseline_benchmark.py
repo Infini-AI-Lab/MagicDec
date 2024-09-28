@@ -4,7 +4,7 @@ import sys
 sys.path.append("..")
 from pathlib import Path
 import torch.distributed as dist
-from MagicDec.Engine.utils import setup_seed, sampling_argmax_batch
+from MagicDec.Engine.utils import setup_seed, sampling_argmax_batch, cuda_graph_for_sampling_argmax_batch
 from MagicDec.Data.data_converter import convert_pg19_dataset
 from transformers import AutoTokenizer
 from torch.utils.data.dataloader import DataLoader
@@ -18,7 +18,7 @@ parser.add_argument('--model_name', type=str, default="meta-llama/Meta-Llama-3.1
 
 parser.add_argument('--B', type=int, default=8, help='Batch size.')
 parser.add_argument('--prefix_len', type=int, default=4000, help='Prefix length')
-parser.add_argument('--max_len', type=int, default=4128, help='Generate length')
+parser.add_argument('--max_len', type=int, default=4096, help='Generate length')
 
 parser.add_argument('--seed', type=int, default=123, help='Random seed.')
 
@@ -68,6 +68,9 @@ dataset = convert_pg19_dataset(tokenizer=tokenizer, seq_len=args.prefix_len)
 dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, drop_last=True)
 num_eval_steps = min(20, len(dataloader))
 
+# vocab_size = engine.model.config.vocab_size
+# target_sample = cuda_graph_for_sampling_argmax_batch(device=DEVICE, dtype=DTYPE, batch_size=BATCH_SIZE, idx_len=1, dim=vocab_size)
+
 total_time = 0.0
 model_steps = 0
 for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
@@ -76,15 +79,23 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
     input_ids = batch[0].to(DEVICE)
     terminate = False
     output = input_ids.clone()
-    logits = engine.encode(input_ids=input_ids)[:,-1]
-    next_tokens = sampling_argmax_batch(logits=logits)
+
+    # logits = engine.encode(input_ids=input_ids)[:,-1]
+    # next_tokens = sampling_argmax_batch(logits=logits)
+
+    next_tokens = engine.encode(input_ids=input_ids)[:,-1:]
     output = torch.cat((output, next_tokens),dim=-1)
     torch.cuda.synchronize()
     t1 = time.perf_counter()
     while output.size(1)<MAX_LEN and terminate == False:
         input_ids=next_tokens.clone()
-        logits = engine.inference(input_ids=input_ids)[:, -1]
-        next_tokens = sampling_argmax_batch(logits=logits)
+        # logits = engine.inference(input_ids=input_ids)[:, -1]
+        # next_tokens = sampling_argmax_batch(logits=logits)
+
+        # logits = engine.inference(input_ids=input_ids)
+        # next_tokens = target_sample(logits)
+
+        next_tokens = engine.inference(input_ids=input_ids)
         output = torch.cat((output, next_tokens),dim=-1)
         model_steps += 1
         if (next_tokens[:,-1] == eot_1)._is_any_true() or (next_tokens[:,-1] == eot_2)._is_any_true(): terminate = True
@@ -97,7 +108,7 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
             print(tokenizer.decode(output[i, args.prefix_len:]))
 
     print(f"Tokens per second :{total_time/model_steps}")
-    if step == 0:
+    if step < 10:
         total_time = 0.0
         model_steps = 0
     if use_tp:
