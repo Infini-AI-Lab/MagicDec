@@ -5,7 +5,7 @@ sys.path.append("..")
 from pathlib import Path
 import torch.distributed as dist
 from MagicDec.Engine.utils import setup_seed, cuda_graph_for_sampling_argmax_batch, sampling_argmax_batch
-from MagicDec.Data.data_converter import convert_pg19_dataset
+from MagicDec.Data.data_converter import convert_pg19_dataset, convert_ruler_dataset
 from transformers import AutoTokenizer
 from torch.utils.data.dataloader import DataLoader
 from tqdm import tqdm
@@ -15,6 +15,7 @@ from MagicDec.Engine.backend import LMBackend
 parser = argparse.ArgumentParser(description='Process model configuration and partitions.')
 parser.add_argument('--model', type=Path, default=Path("checkpoints/meta-llama/Meta-Llama-3.1-8B/model.pth"), help='model')
 parser.add_argument('--model_name', type=str, default="meta-llama/Meta-Llama-3.1-8B", help='model name')
+parser.add_argument('--dataset', type=str, default="pg19", help='Dataset name.')
 parser.add_argument('--draft_budget', type=int, default=4097, help='Dataset end index.')
 parser.add_argument('--rank_group', nargs='+', type=int, help='Target group of ranks')
 parser.add_argument('--compile', action='store_true', help='Whether to compile the model.')
@@ -80,7 +81,12 @@ else:
     eot_2 = tokenizer.encode("<|eot_id|>")[-1]
 print(f"eot_1: {eot_1}, eot_2: {eot_2}")
 
-dataset = convert_pg19_dataset(tokenizer=tokenizer, seq_len=args.prefix_len)
+if args.dataset == "pg19":
+    dataset = convert_pg19_dataset(tokenizer=tokenizer, seq_len=args.prefix_len)
+elif args.dataset.startswith("ruler"):
+    dataset = convert_ruler_dataset(tokenizer=tokenizer, task=args.dataset.split(":")[1], model_name=args.model_name, seq_len=args.prefix_len)
+else:
+    raise ValueError(f"Unknown dataset {args.dataset}")
 dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, drop_last=True)
 num_eval_steps = min(20, len(dataloader))
 

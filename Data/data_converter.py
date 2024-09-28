@@ -1,8 +1,11 @@
 import torch
 from datasets import load_dataset
 import os
+import importlib
+import yaml
 from torch.utils.data import TensorDataset
 from tqdm import tqdm
+from nemo.collections.asr.parts.utils.manifest_utils import read_manifest
 
 def convert_c4_dataset(tokenizer, file_path):
     dataset = load_dataset("json", data_files=file_path, split="train")
@@ -50,6 +53,42 @@ def convert_pg19_dataset(tokenizer, seq_len = 4096, end = 20):
              tokenized_prompt[i][:, 0] = tokenizer.bos_token_id
              tokenized_prompts.append(tokenized_prompt[i])
     data = torch.cat(tokenized_prompts, dim=0).repeat(end,1)
+    return TensorDataset(data)
+
+def convert_ruler_dataset(tokenizer, task, model_name, seq_len = 4096, subset = "validation"):
+    curr_folder = os.path.dirname(os.path.abspath(__file__))
+    try:
+        module = importlib.import_module(f"MagicDec.Data.Ruler.synthetic.constants")
+    except ImportError:
+        print(f"Module MagicDec.Data.Ruler.synthetic.constants not found.")
+
+    tasks_base = module.TASKS
+    with open(os.path.join(curr_folder, f"Ruler/synthetic.yaml"), "r") as f:
+        tasks_customized = yaml.safe_load(f)
+
+    if task not in tasks_customized:
+        raise ValueError(f'{task} is not found in config_tasks.yaml')
+        
+    config = tasks_customized.get(task)
+    config.update(tasks_base[config['task']])
+    
+    root_task = tasks_customized[task]['task']
+    suffix = tasks_base[root_task]['template'].split('{context}')[-1]
+
+    task_file = os.path.join(curr_folder, "Ruler/benchmark_root", model_name, "data", task, f"{subset}.jsonl")
+    
+    data = read_manifest(task_file)
+
+    tokenized_prompts = []
+    tokenized_suffix = tokenizer.encode(suffix, return_tensors="pt")[:, 1:] # remove the bos token
+    suffix_len = tokenized_suffix.shape[-1]
+    for i in range(len(data)):
+        prompt = data[i]['input'][:-len(suffix)]
+        input_ids = tokenizer.encode(prompt, return_tensors="pt", truncation=True, max_length=seq_len, padding=False)
+        if input_ids.shape[-1] >= seq_len - suffix_len:
+            tokenized_prompts.append(torch.cat([input_ids[:, :seq_len - suffix_len], tokenized_suffix], dim=-1))
+    data = torch.cat(tokenized_prompts, dim=0)
+    print("number of prompts", len(tokenized_prompts))
     return TensorDataset(data)
 
 # if __name__ == "__main__":
