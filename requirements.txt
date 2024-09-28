@@ -7,3 +7,7 @@ tiktoken
 packaging
 ninja
 einops
+nemo-toolkit[asr]
+wonderwords
+tenacity
+huggingface_hub==0.23.2
