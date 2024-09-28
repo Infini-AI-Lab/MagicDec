@@ -22,7 +22,19 @@ STOP_WORDS=""
 REMOVE_NEWLINE_TAB=""
 
 TASKS=(
+    "niah_single_1"
+    "niah_single_2"
+    "niah_single_3"
+    "niah_multikey_1"
+    "niah_multikey_2"
+    "niah_multikey_3"
+    "niah_multivalue"
+    "niah_multiquery"
+    "vt"
     "cwe"
+    "fwe"
+    "qa_1"
+    "qa_2"
 )
 
 for TASK in "${TASKS[@]}"; do
