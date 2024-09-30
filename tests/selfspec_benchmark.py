@@ -35,7 +35,8 @@ parser.add_argument('--benchmark', action='store_true', help='Whether to compile
 args = parser.parse_args()
 assert args.prefix_len < args.max_len
 assert (args.prefix_len - args.window_size) % 128 == 0
-assert args.max_len % 128 == 0
+# assert args.max_len % 128 == 0
+assert (args.max_len + 127) // 128 == args.prefix_len // 128 + 1
 assert (args.draft_budget - 1) % 128 == 0
 
 # Init model parallelism
