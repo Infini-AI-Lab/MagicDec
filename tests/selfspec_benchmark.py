@@ -53,7 +53,7 @@ if use_tp:
 setup_seed(args.seed)
 print(f"Using device={DEVICE}")
 
-MAX_LEN_TARGET = args.max_len
+MAX_LEN_TARGET = args.prefix_len + 96
 DTYPE = torch.bfloat16
 BATCH_SIZE = args.B
 benchmark = args.benchmark
@@ -88,6 +88,7 @@ elif args.dataset.startswith("ruler"):
     dataset = convert_ruler_dataset(tokenizer=tokenizer, task=args.dataset.split(":")[1], model_name=args.model_name, seq_len=args.prefix_len)
 else:
     raise ValueError(f"Unknown dataset {args.dataset}")
+
 dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, drop_last=True)
 num_eval_steps = min(20, len(dataloader))
 

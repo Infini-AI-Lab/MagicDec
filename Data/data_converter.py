@@ -82,13 +82,13 @@ def convert_ruler_dataset(tokenizer, task, model_name, seq_len = 4096, subset = 
     tokenized_prompts = []
     tokenized_suffix = tokenizer.encode(suffix, return_tensors="pt")[:, 1:] # remove the bos token
     suffix_len = tokenized_suffix.shape[-1]
+    print("Total number of prompts", len(data))
     for i in range(len(data)):
         prompt = data[i]['input'][:-len(suffix)]
-        input_ids = tokenizer.encode(prompt, return_tensors="pt", truncation=True, max_length=seq_len, padding=False)
-        if input_ids.shape[-1] >= seq_len - suffix_len:
-            tokenized_prompts.append(torch.cat([input_ids[:, :seq_len - suffix_len], tokenized_suffix], dim=-1))
+        input_ids = tokenizer.encode(prompt, return_tensors="pt", truncation=True, max_length=seq_len - suffix_len, padding="max_length")
+        assert input_ids.shape[-1] == seq_len - suffix_len
+        tokenized_prompts.append(torch.cat([input_ids[:, :seq_len - suffix_len], tokenized_suffix], dim=-1))
     data = torch.cat(tokenized_prompts, dim=0)
-    print("number of prompts", len(tokenized_prompts))
     return TensorDataset(data)
 
 # if __name__ == "__main__":

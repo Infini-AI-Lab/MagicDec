@@ -1,7 +1,9 @@
 ROOT_DIR="./Data/Ruler/benchmark_root"
+mkdir -p ${ROOT_DIR}
 
+MODEL_ROOT=$2
 MODEL_NAME=meta-llama/Meta-Llama-3.1-8B
-MODEL_PATH="/scratch/checkpoints/meta-llama/Meta-Llama-3.1-8B"
+MODEL_PATH="${MODEL_ROOT}/meta-llama/Meta-Llama-3.1-8B"
 MODEL_TEMPLATE_TYPE="meta-chat"
 MODEL_FRAMEWORK="hf"
 

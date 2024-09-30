@@ -32,15 +32,16 @@ gen_len=(
     32
 )
 
+prefill=$1
+draft_budget=$2
+bsz=$3
+gamma=$4
+MODEL_ROOT=$5
 
 for task_id in {0..12}; do
     TASK=${TASKS[$task_id]}
     gen_len=${gen_len[$task_id]}
     
-    prefill=$1
-    draft_budget=$2
-    gamma=1
-    bsz=4
     # upper clamp gen_len to 96
     gen_len=$((gen_len > 96 ? 96 : gen_len)) 
     max_len=$((prefill + gen_len))
@@ -49,7 +50,7 @@ for task_id in {0..12}; do
 
     torchrun --standalone --nproc_per_node=1 \
     tests/selfspec_benchmark.py \
-        --model /scratch/checkpoints/${model}/model.pth --model_name ${model} \
+        --model ${MODEL_ROOT}/${model}/model.pth --model_name ${model} \
         --draft_budget ${draft_budget} --rank_group 0 \
         --gamma ${gamma} --B ${bsz} --prefix_len ${prefill} --max_len ${max_len} \
         --printoutput --benchmark --dataset ruler:${TASK} 
