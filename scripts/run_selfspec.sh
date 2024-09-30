@@ -37,10 +37,10 @@ for task_id in {0..12}; do
     TASK=${TASKS[$task_id]}
     gen_len=${gen_len[$task_id]}
     
-    draft_budget=2049
+    prefill=$1
+    draft_budget=$2
     gamma=1
     bsz=4
-    prefill=32032
     # upper clamp gen_len to 96
     gen_len=$((gen_len > 96 ? 96 : gen_len)) 
     max_len=$((prefill + gen_len))
