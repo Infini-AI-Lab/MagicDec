@@ -408,6 +408,71 @@ class Attention(nn.Module):
         self.kv_cache.update_draft(full_key_states, full_value_states, kv_append_indptr, draft_paged_kv_indices, draft_paged_kv_indptr, draft_paged_kv_last_page_len)
         # print(key_states.shape, value_states.shape)
         # time.sleep(1000)
+
+
+
+#         all_query_states = q.reshape(bsz, seqlen, self.n_head, self.head_dim).transpose(1,2)
+#         all_key_states = None
+#         all_value_states = None
+#         for i in range(bsz):
+#             query_states = all_query_states[i:i+1]
+#             key_states = k[i*self.target_num_page_per_request:(i+1)*self.target_num_page_per_request].reshape(1, -1, self.n_local_heads, self.head_dim)[:,:context_len].transpose(1,2).contiguous()
+#             value_states = v[i*self.target_num_page_per_request:(i+1)*self.target_num_page_per_request].reshape(1, -1, self.n_local_heads, self.head_dim)[:,:context_len].transpose(1,2).contiguous()
+
+#             nrepeat = self.n_head // self.n_local_heads
+#             query_states = rearrange(query_states, 'b (h r) l d -> b h (r l) d', r=nrepeat).contiguous()
+
+#             B, H, L, D = query_states.shape
+#             topk = self.draft_budget - self.window_size
+
+#             mask = torch.full((self.window_size, self.window_size), torch.finfo(query_states.dtype).min, device=query_states.device)
+#             mask_cond = torch.arange(mask.size(-1), device=query_states.device)
+#             mask.masked_fill_(mask_cond < (mask_cond + 1).view(mask.size(-1), 1), 0)
+#             mask = mask.to(query_states.device)
+
+#             window_size = self.window_size
+#             chunk_size = 32
+#             assert chunk_size % nrepeat == 0
+#             num_chunks = (L + chunk_size - 1) // chunk_size
+#             attn_weights_sum = torch.zeros(1, self.n_head, context_len - window_size, device=query_states.device, dtype=query_states.dtype) 
+#             for chunk_id in range(num_chunks):
+#                 start_idx = chunk_id * chunk_size
+#                 end_idx = min(start_idx + chunk_size, L)
+#                 chunk_query_states = query_states[:, :, start_idx:end_idx, :]
+#                 attn_weights = torch.einsum('b h i d, b h j d -> b h i j', chunk_query_states, key_states)
+#                 attn_weights[:, :, -window_size:, -window_size:] += mask
+
+#                 attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+#                 attn_weights = rearrange(attn_weights, 'b h (r l) s -> b (h r) l s', r=nrepeat)
+#                 attn_weights_sum += attn_weights[..., : -window_size].sum(dim = -2)
+
+
+#             if self.pooling == 'avgpool':
+#                 attn_cache = F.avg_pool1d(attn_weights_sum, kernel_size = self.kernel_size, padding=self.kernel_size//2, stride=1)
+#             elif self.pooling == 'maxpool':
+#                 attn_cache = F.max_pool1d(attn_weights_sum, kernel_size = self.kernel_size, padding=self.kernel_size//2, stride=1)
+#             else:
+#                 raise ValueError('Pooling method not supported')
+        
+#             # avg across each kv group
+#             attn_cache = rearrange(attn_cache, 'b (h r) s -> b h r s', h = self.n_local_heads)
+#             attn_cache = attn_cache.sum(dim=2)
+
+#             indices = attn_cache.topk(topk, dim=-1).indices
+#             indices = indices.unsqueeze(-1).expand(-1, -1, -1, self.head_dim)
+#             k_past_compress = key_states[:, :, :-self.window_size, :].gather(dim = 2, index = indices)
+#             v_past_compress = value_states[:, :, :-self.window_size, :].gather(dim = 2, index = indices)
+#             k_cur = key_states[:, :, -window_size:, :]
+#             v_cur = value_states[:, :, -window_size:, :]
+#             new_key_states = torch.cat([k_past_compress, k_cur], dim = 2).transpose(1,2).contiguous().view(-1, self.n_local_heads, self.head_dim)
+#             new_value_states = torch.cat([v_past_compress, v_cur], dim = 2).transpose(1,2).contiguous().view(-1, self.n_local_heads, self.head_dim)
+#             if all_key_states == None and all_value_states == None:
+#                 all_key_states = new_key_states.clone()
+#                 all_value_states = new_value_states.clone()
+#             else:
+#                 all_key_states = torch.cat([all_key_states, new_key_states], dim = 0)
+#                 all_value_states = torch.cat([all_value_states, new_value_states], dim = 0)
+#         self.kv_cache.update_draft(all_key_states.contiguous(), all_value_states.contiguous(), kv_append_indptr, draft_paged_kv_indices, draft_paged_kv_indptr, draft_paged_kv_last_page_len)
     '''
 
     def gen_draft_kv(self, q, k, v, bsz, seqlen, context_len, kv_append_indptr, draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len):
