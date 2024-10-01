@@ -90,7 +90,7 @@ else:
     raise ValueError(f"Unknown dataset {args.dataset}")
 
 dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, drop_last=True)
-num_eval_steps = min(20, len(dataloader))
+num_eval_steps = min(10, len(dataloader))
 
 total_time = 0.0
 num_gen_tokens = 0

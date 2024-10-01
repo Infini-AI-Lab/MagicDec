@@ -66,7 +66,7 @@ print(f"eot_1: {eot_1}, eot_2: {eot_2}")
 
 dataset = convert_pg19_dataset(tokenizer=tokenizer, seq_len=args.prefix_len)
 dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, drop_last=True)
-num_eval_steps = min(20, len(dataloader))
+num_eval_steps = min(10, len(dataloader))
 
 # vocab_size = engine.model.config.vocab_size
 # target_sample = cuda_graph_for_sampling_argmax_batch(device=DEVICE, dtype=DTYPE, batch_size=BATCH_SIZE, idx_len=1, dim=vocab_size)
