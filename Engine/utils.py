@@ -206,7 +206,7 @@ def setup_seed(seed):
      torch.backends.cudnn.deterministic = True
 
 def load_model(checkpoint_path, device, precision, use_tp, rank_group=None, group=None):
-    from MagicDec.Engine.model import Transformer
+    from MagicDec.Engine.model_spec import Transformer
     with torch.device('meta'):
         model = Transformer.from_name(checkpoint_path.parent.name)
 

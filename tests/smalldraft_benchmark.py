@@ -205,7 +205,7 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
         engine.paged_kv_last_page_len += accept_nums.flatten().to(torch.int32)
         draft_engine.cachelens += accept_nums.flatten().to(torch.int32)
         draft_engine.paged_kv_last_page_len += accept_nums.flatten().to(torch.int32)
-        
+
         # Get the bonus tokens
         indices = accept_nums - 1
         bonus_tokens = target_tokens.gather(1, indices)
