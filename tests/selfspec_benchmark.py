@@ -53,7 +53,7 @@ if use_tp:
 setup_seed(args.seed)
 print(f"Using device={DEVICE}")
 
-MAX_LEN_TARGET = args.prefix_len + 96
+MAX_LEN_TARGET = args.max_len
 DTYPE = torch.bfloat16
 BATCH_SIZE = args.B
 benchmark = args.benchmark
@@ -88,7 +88,6 @@ if args.dataset == "pg19":
 #     dataset = convert_ruler_dataset(tokenizer=tokenizer, task=args.dataset.split(":")[1], model_name=args.model_name, seq_len=args.prefix_len)
 else:
     raise ValueError(f"Unknown dataset {args.dataset}")
-
 dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, drop_last=True)
 num_eval_steps = min(10, len(dataloader))
 
@@ -192,7 +191,8 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
 
         # Check Number of Nodes + Bonus Token <= max_target_token
         # if num_nodes.max() + 1 >= args.prefix_len + gen_len:
-        if num_nodes.max() + 1 + args.gamma > MAX_LEN_TARGET:
+        # if num_nodes.max() + 1 + args.gamma > MAX_LEN_TARGET:
+        if num_nodes.max() - args.prefix_len > 80:
             terminal = True
         # Put Bonus tokens to the tokens buffer, and prepare the variables for next itr
         if not terminal:
@@ -232,7 +232,3 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
             verify_loop = 0.0
     if use_tp:
         dist.barrier()
-
-print("total time :{:.5f}s, time per iter :{:.5f}s, decoding step: {}, large model step: {}".format(total_time, total_time / target_steps, num_gen_tokens, target_steps))
-if benchmark:
-    print("target time :{:.5f}s, draft time :{:.5f}s, verify loop : {}, avg generate len per sentence: {}".format(target_time/target_steps, draft_time / target_steps, verify_loop/target_steps, num_gen_tokens/target_steps/BATCH_SIZE))

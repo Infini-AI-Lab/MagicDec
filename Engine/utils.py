@@ -65,18 +65,6 @@ def update_kv_abstract(
         ):
     return None
 
-torch.library.define(
-    "mylib::llama31rope",
-    "(Tensor q, Tensor k, Tensor indptr, Tensor offsets) -> (Tensor ropeq, Tensor ropek)",
-)
-@torch.library.impl("mylib::llama31rope", "cuda")
-def llama31rope(q, k, indptr, offsets):
-    return flashinfer.rope.apply_llama31_rope(q, k, indptr, offsets, interleave=True)
-
-@torch.library.register_fake("mylib::llama31rope")
-def llama31rope_abstract(q, k, indptr, offsets):
-    return torch.empty_like(q), torch.empty_like(k)
-
 def get_sampling_logits(logits :torch.Tensor, top_p:float, T: float, replicate = False):
     if replicate:
         logits = logits.clone()
