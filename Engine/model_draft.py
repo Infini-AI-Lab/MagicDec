@@ -1,14 +1,13 @@
 from dataclasses import dataclass
 from typing import Optional
 
+from einops import rearrange
 import torch
 import torch.nn as nn
 from torch import Tensor
 from torch.nn import functional as F
 import torch.distributed as dist
-import math 
-from MagicDec.Engine.utils import custom_func, custom_func_2
-
+import flashinfer
 
 def find_multiple(n: int, k: int) -> int:
     if n % k == 0:
@@ -53,7 +52,7 @@ class ModelArgs:
         if len(config) > 1:
             config.sort(key=len, reverse=True)
             assert len(config[0]) != len(config[1]), name # make sure only one 'best' match
-        print("draft model: ", config[0])
+        print(config)
         return cls(**transformer_configs[config[0]])
 
 
@@ -67,91 +66,174 @@ transformer_configs = {
     "68m": dict(block_size=2048, n_layer=2, n_head=12, n_local_heads=12, dim=768, intermediate_size=3072, vocab_size=32000),
     "tinyllama": dict(block_size =2048, n_layer=22, n_head=32, n_local_heads=4, dim=2048, intermediate_size=5632, vocab_size=32000),
     "llama-3.1-8b": dict(block_size=131072, n_layer=32, n_head=32, n_local_heads=8, dim=4096, intermediate_size=14336, vocab_size=128256, rope_base=500000.0, scaling_factor=8, high_freq_factor=4, low_freq_factor=1, original_max_position_embeddings=8192),
+    "llama-3.1-70b": dict(block_size=131072, n_layer=80, n_head=64, n_local_heads=8, dim=8192, intermediate_size=28672, vocab_size=128256, rope_base=500000.0, scaling_factor=8, high_freq_factor=4, low_freq_factor=1, original_max_position_embeddings=8192),
 }
 
 class KVCache(nn.Module):
-    def __init__(self, max_batch_size, max_seq_length, n_heads, head_dim, dtype=torch.bfloat16, kv_len=512):
+    def __init__(self, max_num_pages, page_size, n_heads, head_dim, dtype=torch.bfloat16, spec=False, draft_max_num_pages=0):
         super().__init__()
-        cache_shape = (max_batch_size, max_seq_length, n_heads, head_dim)
-        self.register_buffer('k_cache', torch.zeros(cache_shape, dtype=dtype))
-        self.register_buffer('v_cache', torch.zeros(cache_shape, dtype=dtype))
-        self.register_buffer('batch_indices',torch.arange(max_batch_size).unsqueeze(1))
-        self.kv_len = kv_len
+        cache_shape = (max_num_pages, 2, page_size, n_heads, head_dim)
+        self.register_buffer('kv_cache', torch.zeros(cache_shape, dtype=dtype))
+        if spec:
+            draft_shape = (draft_max_num_pages, 2, page_size, n_heads, head_dim)
+            self.register_buffer('draft_cache', torch.zeros(draft_shape, dtype=dtype))
+        
+    def update_target(self, k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen):
+        torch.ops.mylib.update_kv(
+            k,
+            v,
+            kv_append_indptr,
+            self.kv_cache,
+            kv_page_indices,
+            kv_page_indptr,
+            kv_page_lastlen,
+        )
+        return self.kv_cache
     
-    def prefill(self, cache_len, k_val, v_val):
-        k_out = self.k_cache
-        v_out = self.v_cache
-        if cache_len+k_val.shape[1] <= self.kv_len:
-            k_out[:, cache_len: cache_len+k_val.shape[1]] = k_val
-            v_out[:, cache_len: cache_len+v_val.shape[1]] = v_val
-            return k_out[:, :cache_len+k_val.shape[1]], v_out[:, :cache_len+k_val.shape[1]]
-        else:
-            new_k = torch.cat((k_out[:, 16:self.kv_len], k_val), dim=1)[:, -self.kv_len+16:]
-            new_v = torch.cat((v_out[:, 16:self.kv_len], v_val), dim=1)[:, -self.kv_len+16:]
-            k_out[:, 16:self.kv_len] = new_k
-            v_out[:, 16:self.kv_len] = new_v
-            return k_out[:, :self.kv_len], v_out[:, :self.kv_len]
+    def update_draft(self, k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen):
+        torch.ops.mylib.update_kv(
+            k,
+            v,
+            kv_append_indptr,
+            self.draft_cache,
+            kv_page_indices,
+            kv_page_indptr,
+            kv_page_lastlen,
+        )
+        return self.draft_cache
 
 class Transformer(nn.Module):
     def __init__(self, config: ModelArgs) -> None:
         super().__init__()
         self.config = config
-
         self.tok_embeddings = nn.Embedding(config.vocab_size, config.dim)
         self.layers = nn.ModuleList(TransformerBlock(config) for _ in range(config.n_layer))
         self.norm = RMSNorm(config.dim, eps=config.norm_eps)
         self.output = nn.Linear(config.dim, config.vocab_size, bias=False)
+        self.world_size = None
+        self.rank = None
+        self.process_group = None
+        # self.freqs_cis: Optional[Tensor] = None
 
-        self.freqs_cis: Optional[Tensor] = None
-        self.mask_cache: Optional[Tensor] = None
-        self.max_batch_size = -1
-        self.max_seq_length = -1
+    def setup_caches(self, num_pages, page_size, spec=False, draft_num_pages = 0, draft_budget = 0, window_size = 32):
 
-    def setup_caches(self, max_batch_size, max_seq_length, kv_len):
-        if self.max_seq_length >= max_seq_length and self.max_batch_size >= max_batch_size:
-            return
         head_dim = self.config.dim // self.config.n_head
-        self.max_seq_length = max_seq_length
-        self.max_batch_size = max_batch_size
-        dtype = self.output.weight.dtype
-        # For quantized layers, dtype is encoded in scales
-        if hasattr(self.output, "scales"):
-            dtype = self.output.scales.dtype
-        elif hasattr(self.output, "scales_and_zeros"):
-            dtype = self.output.scales_and_zeros.dtype
-        for b in self.layers:
-            b.attention.kv_cache = KVCache(max_batch_size, max_seq_length, self.config.n_local_heads, head_dim, dtype, kv_len)
+        # dtype = self.output.weight.dtype
+        dtype = self.output.weight.dtype if self.output.weight.dtype == torch.float16 else torch.bfloat16
 
         if (self.config.high_freq_factor is not None) and (self.config.low_freq_factor is not None):
-            self.freqs_cis = precompute_freqs_cis(self.config.block_size, self.config.dim // self.config.n_head, self.config.rope_base,dtype,
-                                                  # new params
-                                                  self.config.scaling_factor, self.config.low_freq_factor, self.config.high_freq_factor, self.config.original_max_position_embeddings)
-        else:
-            self.freqs_cis = precompute_freqs_cis(self.config.block_size, self.config.dim // self.config.n_head, self.config.rope_base,dtype,
-                                                  # new params
-                                                self.config.scaling_factor)
-        
-        self.prefill_freqs = self.freqs_cis[torch.arange(kv_len).unsqueeze(0).repeat(max_batch_size,1)]
+            torch.library.define(
+                "mylib::rope",
+                "(Tensor q, Tensor k, Tensor indptr, Tensor offsets) -> (Tensor ropeq, Tensor ropek)",
+            )
+            @torch.library.impl("mylib::rope", "cuda")
+            def rope(q, k, indptr, offsets):
+                return flashinfer.rope.apply_llama31_rope(q, k, indptr, offsets, interleave=True)
 
-    def forward(self, idx: Tensor, input_pos: Optional[Tensor], cache_seqlens: Tensor) -> Tensor:
-        assert self.freqs_cis is not None, "Caches must be initialized first"
-        freqs_cis = self.freqs_cis[input_pos]
+            @torch.library.register_fake("mylib::rope")
+            def rope_abstract(q, k, indptr, offsets):
+                return torch.empty_like(q), torch.empty_like(k)
+        else:
+            torch.library.define(
+                "mylib::rope",
+                "(Tensor q, Tensor k, Tensor indptr, Tensor offsets) -> (Tensor ropeq, Tensor ropek)",
+            )
+            @torch.library.impl("mylib::rope", "cuda")
+            def rope(q, k, indptr, offsets):
+                return flashinfer.rope.apply_rope(q, k, indptr, offsets, interleave=True, rope_scale=self.config.scaling_factor, rope_theta=self.config.rope_base)
+
+            @torch.library.register_fake("mylib::rope")
+            def rope_abstract(q, k, indptr, offsets):
+                return torch.empty_like(q), torch.empty_like(k)
+
+        for b in self.layers:
+            b.attention.kv_cache = KVCache(num_pages, page_size, self.config.n_local_heads, head_dim, dtype, spec, draft_num_pages)
+            b.attention.attn_decode = torch.ops.mylib.target_decode
+            b.attention.attn_prefill = torch.ops.mylib.target_prefill
+            b.attention.rope = torch.ops.mylib.rope
+            if spec:
+                b.attention.attn_draft = torch.ops.mylib.draft_decode
+                b.attention.is_spec = True
+                b.attention.draft_budget = draft_budget
+                b.attention.window_size = window_size
+                b.attention.pooling = 'avgpool'
+                b.attention.kernel_size = 5
+
+    def forward(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
         x = self.tok_embeddings(idx)
         for i, layer in enumerate(self.layers):
-            x = layer(x, freqs_cis, cache_seqlens)
+            x = layer(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
         x = self.norm(x)
         logits = self.output(x)
-        return logits
+        # return logits
+        if self.process_group != None:
+            all_max_value = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=logits.dtype, device=logits.device)
+            all_max_indices = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=torch.long, device=logits.device)
+            all_max_value[:, :, self.rank], all_max_indices[:, :, self.rank] = torch.max(logits, dim=-1)
+            all_max_indices[:, :, self.rank] += self.rank * logits.shape[-1]
+            dist.all_reduce(all_max_value)
+            dist.all_reduce(all_max_indices)
+            global_select_indices = torch.argmax(all_max_value, dim=-1)
+            global_indices = torch.gather(all_max_indices, dim=-1, index=global_select_indices.unsqueeze(-1))
+            return global_indices.squeeze(-1)
+        return torch.argmax(logits, dim=-1)
     
-    def prefill(self, idx: Tensor, input_pos: Optional[Tensor], cache_seqlens: Tensor, is_last = False) -> Tensor:
-        assert self.freqs_cis is not None, "Caches must be initialized first"
-        q_freqs_cis = self.freqs_cis[input_pos]
+    def verify(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, draft_kv_page_indices: Tensor, draft_kv_page_indptr: Tensor, draft_kv_page_lastlen: Tensor) -> Tensor:
         x = self.tok_embeddings(idx)
         for i, layer in enumerate(self.layers):
-            x = layer.prefill(x, q_freqs_cis, self.prefill_freqs, cache_seqlens, is_last)
+            x = layer.verify(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen, draft_kv_page_indices, draft_kv_page_indptr, draft_kv_page_lastlen)
         x = self.norm(x)
         logits = self.output(x)
-        return logits
+        # return logits
+        if self.process_group != None:
+            all_max_value = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=logits.dtype, device=logits.device)
+            all_max_indices = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=torch.long, device=logits.device)
+            all_max_value[:, :, self.rank], all_max_indices[:, :, self.rank] = torch.max(logits, dim=-1)
+            all_max_indices[:, :, self.rank] += self.rank * logits.shape[-1]
+            dist.all_reduce(all_max_value)
+            dist.all_reduce(all_max_indices)
+            global_select_indices = torch.argmax(all_max_value, dim=-1)
+            global_indices = torch.gather(all_max_indices, dim=-1, index=global_select_indices.unsqueeze(-1))
+            return global_indices.squeeze(-1)
+        return torch.argmax(logits, dim=-1)
+    
+    def draft_forward(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
+        x = self.tok_embeddings(idx)
+        for i, layer in enumerate(self.layers):
+            x = layer.draft_forward(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+        x = self.norm(x)
+        logits = self.output(x)
+        # return logits
+        if self.process_group != None:
+            all_max_value = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=logits.dtype, device=logits.device)
+            all_max_indices = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=torch.long, device=logits.device)
+            all_max_value[:, :, self.rank], all_max_indices[:, :, self.rank] = torch.max(logits, dim=-1)
+            all_max_indices[:, :, self.rank] += self.rank * logits.shape[-1]
+            dist.all_reduce(all_max_value)
+            dist.all_reduce(all_max_indices)
+            global_select_indices = torch.argmax(all_max_value, dim=-1)
+            global_indices = torch.gather(all_max_indices, dim=-1, index=global_select_indices.unsqueeze(-1))
+            return global_indices.squeeze(-1)
+        return torch.argmax(logits, dim=-1)
+
+    def prefill(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, is_last = False, draft_paged_kv_indptr=None, draft_paged_kv_indices=None, draft_paged_kv_last_page_len=None) -> Tensor:
+        x = self.tok_embeddings(idx)
+        for i, layer in enumerate(self.layers):
+            x = layer.prefill(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen, is_last, draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len)
+        x = self.norm(x)
+        logits = self.output(x)
+        # return logits
+        if self.process_group != None:
+            all_max_value = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=logits.dtype, device=logits.device)
+            all_max_indices = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=torch.long, device=logits.device)
+            all_max_value[:, :, self.rank], all_max_indices[:, :, self.rank] = torch.max(logits, dim=-1)
+            all_max_indices[:, :, self.rank] += self.rank * logits.shape[-1]
+            dist.all_reduce(all_max_value)
+            dist.all_reduce(all_max_indices)
+            global_select_indices = torch.argmax(all_max_value, dim=-1)
+            global_indices = torch.gather(all_max_indices, dim=-1, index=global_select_indices.unsqueeze(-1))
+            return global_indices.squeeze(-1)
+        return torch.argmax(logits, dim=-1)
 
     @classmethod
     def from_name(cls, name: str):
@@ -166,13 +248,23 @@ class TransformerBlock(nn.Module):
         self.ffn_norm = RMSNorm(config.dim, config.norm_eps)
         self.attention_norm = RMSNorm(config.dim, config.norm_eps)
 
-    def forward(self, x: Tensor, freqs_cis: Tensor, cache_seqlens: Tensor) -> Tensor:
-        h = x + self.attention(self.attention_norm(x), freqs_cis, cache_seqlens)
+    def forward(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
+        h = x + self.attention(self.attention_norm(x), offsets, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
         out = h + self.feed_forward(self.ffn_norm(h))
         return out
     
-    def prefill(self, x: Tensor, q_freqs_cis: Tensor, prefill_freqs: Tensor, cache_seqlens: Tensor, is_last: bool) -> Tensor:
-        h = x + self.attention.prefill(self.attention_norm(x), q_freqs_cis, prefill_freqs, cache_seqlens, is_last)
+    def verify(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, draft_kv_page_indices: Tensor, draft_kv_page_indptr: Tensor, draft_kv_page_lastlen: Tensor) -> Tensor:
+        h = x + self.attention.verify(self.attention_norm(x), offsets, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen, draft_kv_page_indices, draft_kv_page_indptr, draft_kv_page_lastlen)
+        out = h + self.feed_forward(self.ffn_norm(h))
+        return out
+    
+    def draft_forward(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
+        h = x + self.attention.draft_forward(self.attention_norm(x), offsets, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+        out = h + self.feed_forward(self.ffn_norm(h))
+        return out
+
+    def prefill(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, is_last = False, draft_paged_kv_indptr=None, draft_paged_kv_indices=None, draft_paged_kv_last_page_len=None) -> Tensor:
+        h = x + self.attention.prefill(self.attention_norm(x), offsets, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen, is_last, draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len)
         out = h + self.feed_forward(self.ffn_norm(h))
         return out
 
@@ -188,17 +280,22 @@ class Attention(nn.Module):
         self.wo = nn.Linear(config.dim, config.dim, bias=False)
         self.kv_cache = None
         self.process_group = None
+        self.attn_decode = None
+        self.attn_prefill = None
+        self.attn_draft = None
+        self.rope = None
+        self.is_spec = False
+
+        self.window_size = None
+        self.pooling = None
+        self.kernel_size = None
+        self.draft_budget = None
 
         self.n_head = config.n_head
         self.head_dim = config.head_dim
         self.n_local_heads = config.n_local_heads
         self.dim = config.dim
         self._register_load_state_dict_pre_hook(self.load_hook)
-
-        if self.n_head == self.n_local_heads:
-            self._attn = torch.ops.mylib.custom_func
-        else:
-            self._attn = torch.ops.mylib.gqa_custom
 
     def load_hook(self, state_dict, prefix, *args):
         if prefix + "wq.weight" in state_dict:
@@ -207,61 +304,125 @@ class Attention(nn.Module):
             wv = state_dict.pop(prefix + "wv.weight")
             state_dict[prefix + "wqkv.weight"] = torch.cat([wq, wk, wv])
 
-    def forward(self, x: Tensor, freqs_cis: Tensor, cache_seqlens: Tensor) -> Tensor:
+    def forward(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
         bsz, seqlen, _ = x.shape
-
         kv_size = self.n_local_heads * self.head_dim
         q, k, v = self.wqkv(x).split([self.dim, kv_size, kv_size], dim=-1)
-
-        q = q.view(bsz, seqlen, self.n_head, self.head_dim)
-        k = k.view(bsz, seqlen, self.n_local_heads, self.head_dim)
-        v = v.view(bsz, seqlen, self.n_local_heads, self.head_dim)
-
-        q = apply_rotary_emb(q, freqs_cis)
-        k = apply_rotary_emb(k, freqs_cis)
-
-        k_cache, v_cache = self.kv_cache.k_cache, self.kv_cache.v_cache
-
-        y = torch.ops.mylib.custom_func(q, k_cache, v_cache, k, v, cache_seqlens)
-        # y = self._attn(q, k_cache, v_cache, k, v, cache_seqlens)
-
+        q = q.view(bsz * seqlen, self.n_head, self.head_dim)
+        k = k.view(bsz * seqlen, self.n_local_heads, self.head_dim)
+        v = v.contiguous().view(bsz * seqlen, self.n_local_heads, self.head_dim)
+        q, k = self.rope(q, k, kv_append_indptr, offsets)
+        kv_cache = self.kv_cache.update_target(k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+        y = self.attn_decode(q, kv_cache)
         y = y.contiguous().view(bsz, seqlen, self.dim)
-
         y = self.wo(y)
         if self.process_group != None:
-            dist.all_reduce(y, group=self.process_group)
+            dist.all_reduce(y)
         return y
     
-    def prefill(self, x: Tensor, q_freqs: Tensor, prefill_freqs: Tensor, cache_seqlens: Tensor, is_last: bool) -> Tensor:
-
+    def verify(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, draft_kv_page_indices: Tensor, draft_kv_page_indptr: Tensor, draft_kv_page_lastlen: Tensor) -> Tensor:
         bsz, seqlen, _ = x.shape
-
         kv_size = self.n_local_heads * self.head_dim
         q, k, v = self.wqkv(x).split([self.dim, kv_size, kv_size], dim=-1)
-
-        q = q.view(bsz, seqlen, self.n_head, self.head_dim)
-        k = k.view(bsz, seqlen, self.n_local_heads, self.head_dim)
-        v = v.view(bsz, seqlen, self.n_local_heads, self.head_dim)
-
-        if self.kv_cache is not None:
-            k, v = self.kv_cache.prefill(cache_seqlens, k, v)
-
-        k_freq = prefill_freqs[:, :k.shape[1]]
-
-        q = apply_rotary_emb(q, q_freqs)
-        k = apply_rotary_emb(k, k_freq)
-
-        if is_last:
-            self.kv_cache.k_cache[:, :k.shape[1]] = k
-
-        y = torch.ops.mylib.custom_func_2(q, k, v)
-
+        q = q.view(bsz * seqlen, self.n_head, self.head_dim)
+        k = k.view(bsz * seqlen, self.n_local_heads, self.head_dim)
+        v = v.contiguous().view(bsz * seqlen, self.n_local_heads, self.head_dim)
+        q, k = self.rope(q, k, kv_append_indptr, offsets)
+        kv_cache = self.kv_cache.update_target(k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+        self.kv_cache.update_draft(k, v, kv_append_indptr, draft_kv_page_indices, draft_kv_page_indptr, draft_kv_page_lastlen)
+        y = self.attn_decode(q, kv_cache)
         y = y.contiguous().view(bsz, seqlen, self.dim)
-
         y = self.wo(y)
         if self.process_group != None:
-            dist.all_reduce(y, group=self.process_group)
+            dist.all_reduce(y)
         return y
+    
+    def draft_forward(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
+        bsz, seqlen, _ = x.shape
+        kv_size = self.n_local_heads * self.head_dim
+        q, k, v = self.wqkv(x).split([self.dim, kv_size, kv_size], dim=-1)
+        q = q.view(bsz * seqlen, self.n_head, self.head_dim)
+        k = k.view(bsz * seqlen, self.n_local_heads, self.head_dim)
+        v = v.contiguous().view(bsz * seqlen, self.n_local_heads, self.head_dim)
+        q, k = self.rope(q, k, kv_append_indptr, offsets)
+        kv_cache = self.kv_cache.update_draft(k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+        y = self.attn_draft(q, kv_cache)
+        y = y.contiguous().view(bsz, seqlen, self.dim)
+        y = self.wo(y)
+        if self.process_group != None:
+            dist.all_reduce(y)
+        return y
+
+    def prefill(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, is_last = False ,draft_paged_kv_indptr=None, draft_paged_kv_indices=None, draft_paged_kv_last_page_len=None) -> Tensor:
+        bsz, seqlen, _ = x.shape
+        kv_size = self.n_local_heads * self.head_dim
+        q, k, v = self.wqkv(x).split([self.dim, kv_size, kv_size], dim=-1)
+        q = q.view(bsz * seqlen, self.n_head, self.head_dim)
+        k = k.view(bsz * seqlen, self.n_local_heads, self.head_dim)
+        v = v.contiguous().view(bsz * seqlen, self.n_local_heads, self.head_dim)
+        q, k = self.rope(q, k, kv_append_indptr, offsets)
+        kv_cache = self.kv_cache.update_target(k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+        y = self.attn_prefill(q, kv_cache)
+        if is_last and self.is_spec:
+            self.gen_draft_kv(q, kv_cache[:, 0], kv_cache[:, 1], bsz, seqlen, offsets[0]+seqlen, (kv_append_indptr/seqlen*self.draft_budget).to(torch.int32), draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len)
+        y = y.contiguous().view(bsz, seqlen, self.dim)
+        y = self.wo(y)
+        if self.process_group != None:
+            dist.all_reduce(y)
+        return y
+
+    def gen_draft_kv(self, q, k, v, bsz, seqlen, context_len, kv_append_indptr, draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len):
+        query_states = q.reshape(bsz, seqlen, self.n_head, self.head_dim).transpose(1,2)
+        key_states = k.reshape(bsz, -1, self.n_local_heads, self.head_dim)[:,:context_len].transpose(1,2).contiguous()
+        value_states = v.reshape(bsz, -1, self.n_local_heads, self.head_dim)[:,:context_len].transpose(1,2).contiguous()
+
+        nrepeat = self.n_head // self.n_local_heads
+        query_states = rearrange(query_states, 'b (h r) l d -> b h (r l) d', r=nrepeat).contiguous()
+
+        B, H, L, D = query_states.shape
+        topk = self.draft_budget - self.window_size
+
+        mask = torch.full((self.window_size, self.window_size), torch.finfo(query_states.dtype).min, device=query_states.device)
+        mask_cond = torch.arange(mask.size(-1), device=query_states.device)
+        mask.masked_fill_(mask_cond < (mask_cond + 1).view(mask.size(-1), 1), 0)
+        mask = mask.to(query_states.device)
+
+        window_size = self.window_size
+        chunk_size = 32
+        assert chunk_size % nrepeat == 0
+        num_chunks = (L + chunk_size - 1) // chunk_size
+        attn_weights_sum = torch.zeros(bsz, self.n_head, context_len - window_size, device=query_states.device, dtype=query_states.dtype) 
+        for chunk_id in range(num_chunks):
+            start_idx = chunk_id * chunk_size
+            end_idx = min(start_idx + chunk_size, L)
+            chunk_query_states = query_states[:, :, start_idx:end_idx, :]
+            attn_weights = torch.einsum('b h i d, b h j d -> b h i j', chunk_query_states, key_states)
+            attn_weights[:, :, -window_size:, -window_size:] += mask
+            attn_weights = nn.functional.softmax(attn_weights, dim=-1, dtype=torch.float32).to(query_states.dtype)
+            attn_weights = rearrange(attn_weights, 'b h (r l) s -> b (h r) l s', r=nrepeat)
+            attn_weights_sum += attn_weights[..., : -window_size].sum(dim = -2)
+
+        if self.pooling == 'avgpool':
+            attn_cache = F.avg_pool1d(attn_weights_sum, kernel_size = self.kernel_size, padding=self.kernel_size//2, stride=1)
+        elif self.pooling == 'maxpool':
+            attn_cache = F.max_pool1d(attn_weights_sum, kernel_size = self.kernel_size, padding=self.kernel_size//2, stride=1)
+        else:
+            raise ValueError('Pooling method not supported')
+    
+        # avg across each kv group
+        attn_cache = rearrange(attn_cache, 'b (h r) s -> b h r s', h = self.n_local_heads)
+        attn_cache = attn_cache.sum(dim=2)
+
+        indices = attn_cache.topk(topk, dim=-1).indices
+        indices = indices.unsqueeze(-1).expand(-1, -1, -1, self.head_dim)
+        k_past_compress = key_states[:, :, :-self.window_size, :].gather(dim = 2, index = indices)
+        v_past_compress = value_states[:, :, :-self.window_size, :].gather(dim = 2, index = indices)
+        k_cur = key_states[:, :, -window_size:, :]
+        v_cur = value_states[:, :, -window_size:, :]
+        new_key_states = torch.cat([k_past_compress, k_cur], dim = 2).transpose(1,2).contiguous().view(-1, self.n_local_heads, self.head_dim)
+        new_value_states = torch.cat([v_past_compress, v_cur], dim = 2).transpose(1,2).contiguous().view(-1, self.n_local_heads, self.head_dim)
+        self.kv_cache.update_draft(new_key_states, new_value_states, kv_append_indptr, draft_paged_kv_indices, draft_paged_kv_indptr, draft_paged_kv_last_page_len)
+
 
 
 class FeedForward(nn.Module):
@@ -275,7 +436,7 @@ class FeedForward(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         y = self.w2(F.silu(self.w1(x)) * self.w3(x))
         if self.process_group != None:
-            dist.all_reduce(y, group=self.process_group)
+            dist.all_reduce(y)
         return y
 
 
@@ -291,77 +452,3 @@ class RMSNorm(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         output = self._norm(x.float()).type_as(x)
         return output * self.weight
-
-
-def _compute_llama3_parameters(inv_freq, old_context_len=8192, scaling_factor=8,low_freq_factor=1,high_freq_factor=4):
-    """
-    To be used for llama 3.1 models
-        - borrowing the logic from: https://github.com/huggingface/transformers/blob/c85510f958e6955d88ea1bafb4f320074bfbd0c1/src/transformers/modeling_rope_utils.py
-        - source: _compute_llama3_parameters in modeling_rope_utils.py
-    """
-    low_freq_wavelen = old_context_len / low_freq_factor
-    high_freq_wavelen = old_context_len / high_freq_factor
-    new_freqs = []
-    for freq in inv_freq:
-        wavelen = 2 * math.pi / freq
-        if wavelen < high_freq_wavelen:
-            new_freqs.append(freq)
-        elif wavelen > low_freq_wavelen:
-            new_freqs.append(freq / scaling_factor)
-        else:
-            assert low_freq_wavelen != high_freq_wavelen
-            smooth = (old_context_len / wavelen - low_freq_factor) / (high_freq_factor - low_freq_factor)
-            new_freqs.append((1 - smooth) * freq / scaling_factor + smooth * freq)
-    inv_freq = torch.tensor(new_freqs, dtype=inv_freq.dtype, device=inv_freq.device)
-    return inv_freq
-
-# def precompute_freqs_cis(
-#     seq_len: int, n_elem: int, base: int = 10000,
-#     dtype: torch.dtype = torch.bfloat16,
-#     scaling_factor = 1
-# ) -> Tensor:
-#     freqs = 1.0 / (base ** (torch.arange(0, n_elem, 2)[: (n_elem // 2)].float() / n_elem))
-#     freqs /= scaling_factor
-#     t = torch.arange(seq_len, device=freqs.device, dtype=freqs.dtype)
-#     # t /=scaling_factor
-#     freqs = torch.outer(t, freqs)
-#     freqs_cis = torch.polar(torch.ones_like(freqs), freqs)
-#     cache = torch.stack([freqs_cis.real, freqs_cis.imag], dim=-1)
-#     return cache.to(dtype=dtype)
-
-def precompute_freqs_cis(
-    seq_len: int, n_elem: int, base: int = 10000,
-    dtype: torch.dtype = torch.bfloat16,
-    scaling_factor: float = 1.0, # added new 
-    low_freq_factor: int = None, # added new
-    high_freq_factor: int = None, # added new
-    original_max_position_embeddings: int = None, # added new
-) -> Tensor:
-    print(f"draft: seq_len: {seq_len}, n_elem: {n_elem}, base: {base}, dtype: {dtype}, scaling_factor: {scaling_factor}, low_freq_factor: {low_freq_factor}, high_freq_factor: {high_freq_factor}, original_max_position_embeddings: {original_max_position_embeddings}")
-
-    freqs = 1.0 / (base ** (torch.arange(0, n_elem, 2)[: (n_elem // 2)].float() / n_elem))
-    
-    if (low_freq_factor is not None) and (high_freq_factor is not None):
-        freqs = _compute_llama3_parameters(freqs, original_max_position_embeddings, scaling_factor, low_freq_factor,high_freq_factor)
-    else:
-        freqs /= scaling_factor
-    t = torch.arange(seq_len, device=freqs.device, dtype=freqs.dtype)
-    # t /=scaling_factor
-    freqs = torch.outer(t, freqs)
-    freqs_cis = torch.polar(torch.ones_like(freqs), freqs)
-    cache = torch.stack([freqs_cis.real, freqs_cis.imag], dim=-1)
-    return cache.to(dtype=dtype)
-
-def apply_rotary_emb(x: Tensor, freqs_cis: Tensor) -> Tensor:
-    xshaped = x.float().reshape(*x.shape[:-1], -1, 2)
-    freqs_cis = freqs_cis.view(x.shape[0], xshaped.size(1), 1, xshaped.size(3), 2)
-    x_out2 = torch.stack(
-        [
-            xshaped[..., 0] * freqs_cis[..., 0] - xshaped[..., 1] * freqs_cis[..., 1],
-            xshaped[..., 1] * freqs_cis[..., 0] + xshaped[..., 0] * freqs_cis[..., 1],
-        ],
-        -1,
-    )
-
-    x_out2 = x_out2.flatten(3)
-    return x_out2.type_as(x)
