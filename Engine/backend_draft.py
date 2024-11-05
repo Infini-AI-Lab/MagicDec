@@ -57,29 +57,29 @@ class LMBackend_Draft:
         
         self.prefill_wrapper = flashinfer.BatchPrefillWithPagedKVCacheWrapper(self.prefill_buffer, "NHD")
         torch.library.define(
-            "mylib::target_decode",
+            "mylib::draft_decode",
             "(Tensor q, Tensor kv_cache) -> Tensor",
         )
-        @torch.library.impl("mylib::target_decode", "cuda")
-        def target_decode(q, kv_cache):
+        @torch.library.impl("mylib::draft_decode", "cuda")
+        def draft_decode(q, kv_cache):
             return self.decode_wrapper.run(
                 q, kv_cache
             )
-        @torch.library.register_fake("mylib::target_decode")
-        def target_decode_abstract(q, kv_cache):
+        @torch.library.register_fake("mylib::draft_decode")
+        def draft_decode_abstract(q, kv_cache):
             return torch.empty_like(q)
         
         torch.library.define(
-            "mylib::target_prefill",
+            "mylib::draft_prefill",
             "(Tensor q, Tensor kv_cache) -> Tensor",
         )
-        @torch.library.impl("mylib::target_prefill", "cuda")
-        def target_prefill(q, kv_cache):
+        @torch.library.impl("mylib::draft_prefill", "cuda")
+        def draft_prefill(q, kv_cache):
             return self.prefill_wrapper.run(
                 q, kv_cache
             )
-        @torch.library.register_fake("mylib::target_prefill")
-        def target_prefill_abstract(q, kv_cache):
+        @torch.library.register_fake("mylib::draft_prefill")
+        def draft_prefill_abstract(q, kv_cache):
             return torch.empty_like(q)
 
         # If using speculative decoding, init draft attention backend

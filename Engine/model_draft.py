@@ -123,34 +123,34 @@ class Transformer(nn.Module):
 
         if (self.config.high_freq_factor is not None) and (self.config.low_freq_factor is not None):
             torch.library.define(
-                "mylib::rope",
+                "mylib::draft_rope",
                 "(Tensor q, Tensor k, Tensor indptr, Tensor offsets) -> (Tensor ropeq, Tensor ropek)",
             )
-            @torch.library.impl("mylib::rope", "cuda")
-            def rope(q, k, indptr, offsets):
+            @torch.library.impl("mylib::draft_rope", "cuda")
+            def draft_rope(q, k, indptr, offsets):
                 return flashinfer.rope.apply_llama31_rope(q, k, indptr, offsets, interleave=True)
 
-            @torch.library.register_fake("mylib::rope")
-            def rope_abstract(q, k, indptr, offsets):
+            @torch.library.register_fake("mylib::draft_rope")
+            def draft_rope_abstract(q, k, indptr, offsets):
                 return torch.empty_like(q), torch.empty_like(k)
         else:
             torch.library.define(
-                "mylib::rope",
+                "mylib::draft_rope",
                 "(Tensor q, Tensor k, Tensor indptr, Tensor offsets) -> (Tensor ropeq, Tensor ropek)",
             )
-            @torch.library.impl("mylib::rope", "cuda")
-            def rope(q, k, indptr, offsets):
+            @torch.library.impl("mylib::draft_rope", "cuda")
+            def draft_rope(q, k, indptr, offsets):
                 return flashinfer.rope.apply_rope(q, k, indptr, offsets, interleave=True, rope_scale=self.config.scaling_factor, rope_theta=self.config.rope_base)
 
-            @torch.library.register_fake("mylib::rope")
-            def rope_abstract(q, k, indptr, offsets):
+            @torch.library.register_fake("mylib::draft_rope")
+            def draft_rope_abstract(q, k, indptr, offsets):
                 return torch.empty_like(q), torch.empty_like(k)
 
         for b in self.layers:
             b.attention.kv_cache = KVCache(num_pages, page_size, self.config.n_local_heads, head_dim, dtype, spec, draft_num_pages)
-            b.attention.attn_decode = torch.ops.mylib.target_decode
-            b.attention.attn_prefill = torch.ops.mylib.target_prefill
-            b.attention.rope = torch.ops.mylib.rope
+            b.attention.attn_decode = torch.ops.mylib.draft_decode
+            b.attention.attn_prefill = torch.ops.mylib.draft_prefill
+            b.attention.rope = torch.ops.mylib.draft_rope
             if spec:
                 b.attention.attn_draft = torch.ops.mylib.draft_decode
                 b.attention.is_spec = True

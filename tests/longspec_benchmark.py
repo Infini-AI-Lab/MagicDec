@@ -56,7 +56,7 @@ if use_tp:
 setup_seed(args.seed)
 print(f"Using device={DEVICE}")
 
-MAX_LEN_TARGET = args.prefix_len + args.gen_len + args.gamma
+MAX_LEN_TARGET = args.max_len
 DTYPE = torch.bfloat16
 BATCH_SIZE = args.B
 benchmark = args.benchmark
