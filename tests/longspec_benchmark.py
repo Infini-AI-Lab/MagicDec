@@ -18,7 +18,7 @@ parser.add_argument('--model', type=Path, default=Path("checkpoints/meta-llama/M
 parser.add_argument('--target', type=Path, default=Path("checkpoints/meta-llama/Meta-Llama-3.1-8B/model.pth"), help='model')
 parser.add_argument('--model_name', type=str, default="meta-llama/Meta-Llama-3.1-8B", help='model name')
 parser.add_argument('--dataset', type=str, default="pg19", help='Dataset name.')
-parser.add_argument('--draft_budget', type=int, default=256, help='Dataset end index.')
+parser.add_argument('--draft_budget', type=int, default=1025, help='Dataset end index.')
 parser.add_argument('--rank_group', nargs='+', type=int, help='Target group of ranks')
 parser.add_argument('--compile', action='store_true', help='Whether to compile the model.')
 
@@ -77,7 +77,7 @@ draft = LMBackend_Draft(dtype=DTYPE, device=DEVICE, dec_len=[1,2])
 draft.load_model(draft_checkpoint_path, use_tp=use_tp, rank_group=args.rank_group, group=global_group)
 if args.compile:
     draft.compile()
-draft.setup_caches(max_batch_size=BATCH_SIZE, max_seq_length=MAX_LEN_TARGET)
+draft.setup_caches(max_batch_size=BATCH_SIZE, max_seq_length=MAX_LEN_TARGET, draft_budget=args.draft_budget)
 
 vocab_size = engine.model.config.vocab_size
 
@@ -106,6 +106,10 @@ if benchmark:
     verify_loop = 0.0
 
 for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
+    # if step <= 7:
+    #     continue
+    # if step > 8:
+    #     break
     if step >= num_eval_steps:
         break
     input_ids = batch[0].to(DEVICE)
@@ -116,8 +120,11 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
     num_nodes = torch.zeros(BATCH_SIZE,device=DEVICE).long()
     num_nodes += input_ids.shape[1]
 
-    tokens_buffer[:, :1] = engine.encode(input_ids=input_ids)[:,-1]
+    tokens_buffer[:, :1] = engine.encode(input_ids=input_ids)[:,-1:]
     draft.encode(input_ids=input_ids)
+
+    # print("Target: ",engine.cachelens, engine.paged_kv_last_page_len)
+    # print("Draft: ", draft.cachelens, draft.paged_kv_last_page_len)
         
     next_double = False
     double_buffer = None
@@ -160,6 +167,12 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
             
         target_steps+=1
 
+        # print("After run Target: ",engine.cachelens, engine.paged_kv_last_page_len)
+        # print("After run Draft: ", draft.cachelens, draft.paged_kv_last_page_len)
+
+        # print(tokenizer.decode(tokens_buffer[-1]))
+        # print(tokenizer.decode(target_tokens[-1]))
+
 
     # Verify loop
     # Vectorized Verify Loop
@@ -195,6 +208,8 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
         engine.cachelens += accept_nums.flatten().to(torch.int32)
         engine.paged_kv_last_page_len += accept_nums.flatten().to(torch.int32)
 
+        # print(accept_nums)
+
         max_limit = torch.full_like(accept_nums, args.gamma, device = DEVICE)
         limited_accept_nums = torch.min(accept_nums, max_limit)
 
@@ -202,6 +217,10 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
         draft.paged_kv_last_page_len = draft.paged_kv_last_page_len - args.gamma
         draft.cachelens += limited_accept_nums.flatten().to(torch.int32)
         draft.paged_kv_last_page_len += limited_accept_nums.flatten().to(torch.int32)
+
+
+        # print("Target: ",engine.cachelens, engine.paged_kv_last_page_len)
+        # print("Draft: ", draft.cachelens, draft.paged_kv_last_page_len)
 
         
         # Get the bonus tokens
@@ -222,8 +241,9 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
                 double_buffer = torch.zeros((BATCH_SIZE, 2), device=DEVICE).long()
                 mask = (accept_nums == (args.gamma + 1)).squeeze()
                 double_buffer[:, 0] = torch.where(mask, tokens_buffer[:, -1], bonus_tokens[:, 0])
+                double_buffer[:, 1] = torch.where(mask, bonus_tokens[:, 0], torch.full((BATCH_SIZE,), -100, device=bonus_tokens.device))
+                non_zero_mask = double_buffer != -100
                 double_buffer[:, 1] = torch.where(mask, bonus_tokens[:, 0], torch.zeros_like(bonus_tokens[:, 0]))
-                non_zero_mask = double_buffer != 0
                 cachelens_update = non_zero_mask.sum(dim=1).flatten()
         
         if not terminal:
@@ -246,11 +266,13 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
     num_gen_tokens += (num_nodes.sum() - (input_ids.shape[1]+1)*BATCH_SIZE)
     if args.printoutput:
         for i in range(BATCH_SIZE):
+            print("Sequence ", i)
             print(tokenizer.decode(output[i, args.prefix_len:num_nodes[i]]))
     print("total time :{:.5f}s, time per iter :{:.5f}s, decoding step: {}, large model step: {}".format(total_time, total_time / target_steps, num_gen_tokens, target_steps))
+    print(num_nodes)
     if benchmark:
         print("target time :{:.5f}s, draft time :{:.5f}s, verify loop : {}, avg generate len per sentence: {}".format(target_time/target_steps, draft_time / target_steps, verify_loop/target_steps, num_gen_tokens/target_steps/BATCH_SIZE))
-    if step < 5:   # TODO: revert to 10?
+    if step < 10:   # TODO: revert to 10?
         total_time = 0.0
         num_gen_tokens = 0
         target_steps = 0

@@ -192,7 +192,7 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
         # Check Number of Nodes + Bonus Token <= max_target_token
         # if num_nodes.max() + 1 >= args.prefix_len + gen_len:
         # if num_nodes.max() + 1 + args.gamma > MAX_LEN_TARGET:
-        if num_nodes.max() - args.prefix_len > 80:
+        if num_nodes.max() - args.prefix_len >= 80:
             terminal = True
         # Put Bonus tokens to the tokens buffer, and prepare the variables for next itr
         if not terminal:
@@ -218,11 +218,12 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
     num_gen_tokens += (num_nodes.sum() - (input_ids.shape[1] + 1) * BATCH_SIZE)
     if args.printoutput:
         for i in range(BATCH_SIZE):
+            print("Sequence ", i)
             print(tokenizer.decode(output[i, args.prefix_len:num_nodes[i]]))
     print("total time :{:.5f}s, time per iter :{:.5f}s, decoding step: {}, large model step: {}".format(total_time, total_time / target_steps, num_gen_tokens, target_steps))
     if benchmark:
         print("target time :{:.5f}s, draft time :{:.5f}s, verify loop : {}, avg generate len per sentence: {}".format(target_time/target_steps, draft_time / target_steps, verify_loop/target_steps, num_gen_tokens/target_steps/BATCH_SIZE))
-    if step < 5:   # TODO: revert to 10?
+    if step < 10:   # TODO: revert to 10?
         total_time = 0.0
         num_gen_tokens = 0
         target_steps = 0
