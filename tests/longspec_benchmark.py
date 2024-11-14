@@ -49,7 +49,7 @@ draft_tp = len(args.draft_ranks) > 1
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
 global print
 from MagicDec.Engine.tp import init_dist
-use_tp = len(args.rank_group) > 1
+use_tp = len(args.draft_rank_group) > 1
 global_group = None
 draft_group = None
 if use_tp:
