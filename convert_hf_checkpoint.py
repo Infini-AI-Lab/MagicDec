@@ -9,6 +9,7 @@ import json
 import re
 import shutil
 import sys
+import copy
 from pathlib import Path
 from typing import Optional
 from safetensors.torch import load_file as load_safetensors_file
@@ -52,13 +53,10 @@ def convert_hf_checkpoint(
       except AssertionError:
         print(f"{model_map_json_pytorch} not found")
    
-    if model_map_json is None:
-       print("Use single weight map")
-       bin_file = checkpoint_dir / "pytorch_model.bin"
+    if model_map_json is None: raise Exception("No model map found!")
 
-    if model_map_json != None:
-        with open(model_map_json) as json_map:
-            bin_index = json.load(json_map)
+    with open(model_map_json) as json_map:
+        bin_index = json.load(json_map)
 
     weight_map = {
         "model.embed_tokens.weight": "tok_embeddings.weight",
@@ -73,10 +71,9 @@ def convert_hf_checkpoint(
         "model.layers.{}.input_layernorm.weight": "layers.{}.attention_norm.weight",
         "model.layers.{}.post_attention_layernorm.weight": "layers.{}.ffn_norm.weight",
         "model.norm.weight": "norm.weight",
-        "lm_head.weight": "output.weight",
+        "lm_head.weight": "output.weight"
     }
-    if model_map_json != None:
-        bin_files = {checkpoint_dir / bin for bin in bin_index["weight_map"].values()}
+    bin_files = {checkpoint_dir / bin for bin in bin_index["weight_map"].values()}
 
     def permute(w, n_head):
         dim = config.dim
@@ -87,18 +84,15 @@ def convert_hf_checkpoint(
         )
 
     merged_result = {}
-    if model_map_json != None:
-        for file in sorted(bin_files):
-            if "safetensors" in str(file):
-                state_dict = load_safetensors_file(str(file), device="cpu")
-                merged_result.update(state_dict)
-            else:
-                state_dict = torch.load(str(file), map_location="cpu", mmap=True, weights_only=True)
-                merged_result.update(state_dict)
-    else:
-        state_dict = state_dict = torch.load(str(bin_file), map_location="cpu", mmap=True, weights_only=True)
-        merged_result.update(state_dict)
- 
+    for file in sorted(bin_files):
+       if "safetensors" in str(file):
+           state_dict = load_safetensors_file(str(file), device="cpu")
+           merged_result.update(state_dict)
+       else:
+           state_dict = torch.load(str(file), map_location="cpu", mmap=True, weights_only=True)
+           merged_result.update(state_dict)
+    if "lm_head.weight" not in merged_result.keys():
+        merged_result["lm_head.weight"] = copy.deepcopy(merged_result["model.embed_tokens.weight"])
     final_result = {}
     for key, value in merged_result.items():
         if "layers" in key:
@@ -124,10 +118,14 @@ def convert_hf_checkpoint(
             del final_result[key]
             del final_result[key.replace("wq", "wk")]
             del final_result[key.replace("wq", "wv")]
+   
     print(f"Saving checkpoint to {checkpoint_dir / 'model.pth'}")
     torch.save(final_result, checkpoint_dir / "model.pth")
-    if 'llama-3' in model_name.lower():
-        original_dir = checkpoint_dir / "original"
+    if 'llama-3-' in model_name.lower() or 'llama-3.' in model_name.lower():
+        if 'llama-3.1-405b' in model_name.lower():
+            original_dir = checkpoint_dir / "original" / "mp16"
+        else:
+            original_dir = checkpoint_dir / "original"
         tokenizer_model = original_dir / "tokenizer.model"
         tokenizer_model_tiktoken = checkpoint_dir / "tokenizer.model"
         print(f"Copying {tokenizer_model} to {tokenizer_model_tiktoken}")
