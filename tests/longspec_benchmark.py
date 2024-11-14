@@ -41,7 +41,7 @@ args = parser.parse_args()
 assert args.prefix_len < args.max_len
 assert (args.max_len + 127) // 128 == args.prefix_len // 128 + 1
 
-draft_tp = len(args.draft_ranks) > 1
+draft_tp = len(args.draft_rank_group) > 1
 
 # assert args.prefix_len + args.gen_len + args.gamma + 1 <= 4096
 
@@ -184,7 +184,7 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
                             tokens_buffer[:,i+1:i+2] = draft.inference(tokens_buffer[:, i].view(-1,1))
                         continue
                     tokens_buffer[:,i+1:i+2] = draft.inference(tokens_buffer[:, i].view(-1,1))
-            dist.broadcast(tokens_buffer, src=args.draft_ranks[0], group=global_group)
+            dist.broadcast(tokens_buffer, src=args.draft_rank_group[0], group=global_group)
 
 
         if benchmark:
