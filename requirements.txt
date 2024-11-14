@@ -1,6 +1,5 @@
 transformers==4.36.2
 numpy==1.26.3
-Cython
 protobuf
 sentencepiece
 datasets==2.16.1
