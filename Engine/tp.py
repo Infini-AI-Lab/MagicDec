@@ -195,8 +195,8 @@ def _apply_tp_Transformer(Transformer: Transformer, rank_group, process_group) -
     Transformer.config.n_local_heads = local_num_kv_heads
     _apply_tp_linear_mlp(Transformer.output, "colwise", rank_group=rank_group)
     Transformer.process_group = process_group
-    Transformer.world_size = _get_world_size()
-    Transformer.rank = _get_global_rank()
+    Transformer.world_size = dist.get_world_size(process_group)
+    Transformer.rank = dist.get_rank(process_group)
 
 
 def apply_tp(model: Transformer, rank_group, group) -> None:

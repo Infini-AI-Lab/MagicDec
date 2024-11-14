@@ -243,7 +243,7 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
         engine.cachelens += accept_nums.flatten().to(torch.int32)
         engine.paged_kv_last_page_len += accept_nums.flatten().to(torch.int32)
 
-        print(accept_nums)
+        # print(accept_nums)
 
         max_limit = torch.full_like(accept_nums, args.gamma, device = DEVICE)
         limited_accept_nums = torch.min(accept_nums, max_limit)

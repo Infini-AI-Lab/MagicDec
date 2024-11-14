@@ -171,8 +171,8 @@ class Transformer(nn.Module):
             all_max_indices = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=torch.long, device=logits.device)
             all_max_value[:, :, self.rank], all_max_indices[:, :, self.rank] = torch.max(logits, dim=-1)
             all_max_indices[:, :, self.rank] += self.rank * logits.shape[-1]
-            dist.all_reduce(all_max_value)
-            dist.all_reduce(all_max_indices)
+            dist.all_reduce(all_max_value, group = self.process_group)
+            dist.all_reduce(all_max_indices, group = self.process_group)
             global_select_indices = torch.argmax(all_max_value, dim=-1)
             global_indices = torch.gather(all_max_indices, dim=-1, index=global_select_indices.unsqueeze(-1))
             return global_indices.squeeze(-1)
@@ -190,8 +190,8 @@ class Transformer(nn.Module):
             all_max_indices = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=torch.long, device=logits.device)
             all_max_value[:, :, self.rank], all_max_indices[:, :, self.rank] = torch.max(logits, dim=-1)
             all_max_indices[:, :, self.rank] += self.rank * logits.shape[-1]
-            dist.all_reduce(all_max_value)
-            dist.all_reduce(all_max_indices)
+            dist.all_reduce(all_max_value, group = self.process_group)
+            dist.all_reduce(all_max_indices, group = self.process_group)
             global_select_indices = torch.argmax(all_max_value, dim=-1)
             global_indices = torch.gather(all_max_indices, dim=-1, index=global_select_indices.unsqueeze(-1))
             return global_indices.squeeze(-1)
@@ -209,8 +209,8 @@ class Transformer(nn.Module):
             all_max_indices = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=torch.long, device=logits.device)
             all_max_value[:, :, self.rank], all_max_indices[:, :, self.rank] = torch.max(logits, dim=-1)
             all_max_indices[:, :, self.rank] += self.rank * logits.shape[-1]
-            dist.all_reduce(all_max_value)
-            dist.all_reduce(all_max_indices)
+            dist.all_reduce(all_max_value, group = self.process_group)
+            dist.all_reduce(all_max_indices, group = self.process_group)
             global_select_indices = torch.argmax(all_max_value, dim=-1)
             global_indices = torch.gather(all_max_indices, dim=-1, index=global_select_indices.unsqueeze(-1))
             return global_indices.squeeze(-1)
@@ -228,8 +228,8 @@ class Transformer(nn.Module):
             all_max_indices = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=torch.long, device=logits.device)
             all_max_value[:, :, self.rank], all_max_indices[:, :, self.rank] = torch.max(logits, dim=-1)
             all_max_indices[:, :, self.rank] += self.rank * logits.shape[-1]
-            dist.all_reduce(all_max_value)
-            dist.all_reduce(all_max_indices)
+            dist.all_reduce(all_max_value, group = self.process_group)
+            dist.all_reduce(all_max_indices, group = self.process_group)
             global_select_indices = torch.argmax(all_max_value, dim=-1)
             global_indices = torch.gather(all_max_indices, dim=-1, index=global_select_indices.unsqueeze(-1))
             return global_indices.squeeze(-1)
@@ -317,7 +317,7 @@ class Attention(nn.Module):
         y = y.contiguous().view(bsz, seqlen, self.dim)
         y = self.wo(y)
         if self.process_group != None:
-            dist.all_reduce(y)
+            dist.all_reduce(y, group=self.process_group)
         return y
     
     def verify(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, draft_kv_page_indices: Tensor, draft_kv_page_indptr: Tensor, draft_kv_page_lastlen: Tensor) -> Tensor:
@@ -334,7 +334,7 @@ class Attention(nn.Module):
         y = y.contiguous().view(bsz, seqlen, self.dim)
         y = self.wo(y)
         if self.process_group != None:
-            dist.all_reduce(y)
+            dist.all_reduce(y, group=self.process_group)
         return y
     
     def draft_forward(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
@@ -350,7 +350,7 @@ class Attention(nn.Module):
         y = y.contiguous().view(bsz, seqlen, self.dim)
         y = self.wo(y)
         if self.process_group != None:
-            dist.all_reduce(y)
+            dist.all_reduce(y, group=self.process_group)
         return y
 
     def prefill(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, is_last = False ,draft_paged_kv_indptr=None, draft_paged_kv_indices=None, draft_paged_kv_last_page_len=None) -> Tensor:
@@ -368,7 +368,7 @@ class Attention(nn.Module):
         y = y.contiguous().view(bsz, seqlen, self.dim)
         y = self.wo(y)
         if self.process_group != None:
-            dist.all_reduce(y)
+            dist.all_reduce(y, group=self.process_group)
         return y
 
     def gen_draft_kv(self, q, k, v, bsz, seqlen, context_len, kv_append_indptr, draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len):
@@ -436,7 +436,7 @@ class FeedForward(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         y = self.w2(F.silu(self.w1(x)) * self.w3(x))
         if self.process_group != None:
-            dist.all_reduce(y)
+            dist.all_reduce(y, group=self.process_group)
         return y
 
 
