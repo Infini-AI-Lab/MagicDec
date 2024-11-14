@@ -21,6 +21,7 @@ parser.add_argument('--dataset', type=str, default="pg19", help='Dataset name.')
 parser.add_argument('--draft_budget', type=int, default=1025, help='Dataset end index.')
 parser.add_argument('--rank_group', nargs='+', type=int, help='Target group of ranks')
 parser.add_argument('--compile', action='store_true', help='Whether to compile the model.')
+parser.add_argument('--draft_rank_group', nargs='+', type=int, help='Target group of ranks')
 
 parser.add_argument('--gamma', type=int, default=5, help='start')
 
@@ -40,6 +41,8 @@ args = parser.parse_args()
 assert args.prefix_len < args.max_len
 assert (args.max_len + 127) // 128 == args.prefix_len // 128 + 1
 
+draft_tp = len(args.draft_ranks) > 1
+
 # assert args.prefix_len + args.gen_len + args.gamma + 1 <= 4096
 
 # Init model parallelism
@@ -48,8 +51,12 @@ global print
 from MagicDec.Engine.tp import init_dist
 use_tp = len(args.rank_group) > 1
 global_group = None
+draft_group = None
 if use_tp:
-    rank, global_group = init_dist()
+    if draft_tp:
+        rank, global_group, draft_group = init_dist(args.draft_rank_group)
+    else:
+        rank, global_group = init_dist()
     if rank != args.rank_group[0]:
         print = lambda *args, **kwargs: None
 
@@ -73,15 +80,23 @@ if args.compile:
 engine.setup_caches(max_batch_size=BATCH_SIZE, max_seq_length=MAX_LEN_TARGET)
 
 # Load draft model
-draft = LMBackend_Draft(dtype=DTYPE, device=DEVICE, dec_len=[1,2])
-draft.load_model(draft_checkpoint_path, use_tp=use_tp, rank_group=args.rank_group, group=global_group)
-if args.compile:
-    draft.compile()
-draft.setup_caches(max_batch_size=BATCH_SIZE, max_seq_length=MAX_LEN_TARGET, draft_budget=args.draft_budget)
-
-vocab_size = engine.model.config.vocab_size
+if not use_tp:
+    draft = LMBackend_Draft(dtype=DTYPE, device=DEVICE, dec_len=[1,2])
+    draft.load_model(draft_checkpoint_path, use_tp=False)
+    if args.compile:
+        draft.compile()
+    draft.setup_caches(max_batch_size=BATCH_SIZE, max_seq_length=MAX_LEN_TARGET, draft_budget=args.draft_budget)
+else:
+    if rank in args.draft_rank_group:
+        draft = LMBackend_Draft(dtype=DTYPE, device=DEVICE, dec_len=[1,2])
+        draft.load_model(draft_checkpoint_path, use_tp=draft_tp, rank_group=args.draft_rank_group, group=draft_group)
+        if args.compile:
+            draft.compile()
+        draft.setup_caches(max_batch_size=BATCH_SIZE, max_seq_length=MAX_LEN_TARGET, draft_budget=args.draft_budget)
+    dist.barrier()
 
 # Load dataset
+vocab_size = engine.model.config.vocab_size
 tokenizer = AutoTokenizer.from_pretrained(args.model_name)
 tokenizer.pad_token = tokenizer.eos_token
 eot_1 = tokenizer.eos_token_id
@@ -121,7 +136,12 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
     num_nodes += input_ids.shape[1]
 
     tokens_buffer[:, :1] = engine.encode(input_ids=input_ids)[:,-1:]
-    draft.encode(input_ids=input_ids)
+    if not use_tp:
+        draft.encode(input_ids=input_ids)
+    else:
+        if rank in args.draft_rank_group:
+            draft.encode(input_ids=input_ids)
+        dist.barrier()
 
     # print("Target: ",engine.cachelens, engine.paged_kv_last_page_len)
     # print("Draft: ", draft.cachelens, draft.paged_kv_last_page_len)
@@ -139,17 +159,32 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
             t1 = time.time()
 
         # Draft speculation
-        for i in range(args.gamma):
-            if i == 0:
-                if next_double:
-                    # The cachelens should increase 1 or 2
-                    next_tokens = draft.inference(double_buffer, cachelen_update=cachelens_update)
-                    tokens_buffer[:,i+1:i+2] = next_tokens.gather(1, cachelens_update.view(-1,1) - 1)
-                    next_double = False
-                else:
+        if not use_tp:
+            for i in range(args.gamma):
+                if i == 0:
+                    if next_double:
+                        # The cachelens should increase 1 or 2
+                        next_tokens = draft.inference(double_buffer, cachelen_update=cachelens_update)
+                        tokens_buffer[:,i+1:i+2] = next_tokens.gather(1, cachelens_update.view(-1,1) - 1)
+                        next_double = False
+                    else:
+                        tokens_buffer[:,i+1:i+2] = draft.inference(tokens_buffer[:, i].view(-1,1))
+                    continue
+                tokens_buffer[:,i+1:i+2] = draft.inference(tokens_buffer[:, i].view(-1,1))
+        else:
+            if rank in args.draft_rank_group:
+                for i in range(args.gamma):
+                    if i == 0:
+                        if next_double:
+                            # The cachelens should increase 1 or 2
+                            next_tokens = draft.inference(double_buffer, cachelen_update=cachelens_update)
+                            tokens_buffer[:,i+1:i+2] = next_tokens.gather(1, cachelens_update.view(-1,1) - 1)
+                            next_double = False
+                        else:
+                            tokens_buffer[:,i+1:i+2] = draft.inference(tokens_buffer[:, i].view(-1,1))
+                        continue
                     tokens_buffer[:,i+1:i+2] = draft.inference(tokens_buffer[:, i].view(-1,1))
-                continue
-            tokens_buffer[:,i+1:i+2] = draft.inference(tokens_buffer[:, i].view(-1,1))
+            dist.broadcast(tokens_buffer, src=args.draft_ranks[0], group=global_group)
 
 
         if benchmark:
@@ -208,15 +243,21 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
         engine.cachelens += accept_nums.flatten().to(torch.int32)
         engine.paged_kv_last_page_len += accept_nums.flatten().to(torch.int32)
 
-        # print(accept_nums)
+        print(accept_nums)
 
         max_limit = torch.full_like(accept_nums, args.gamma, device = DEVICE)
         limited_accept_nums = torch.min(accept_nums, max_limit)
-
-        draft.cachelens = draft.cachelens - args.gamma
-        draft.paged_kv_last_page_len = draft.paged_kv_last_page_len - args.gamma
-        draft.cachelens += limited_accept_nums.flatten().to(torch.int32)
-        draft.paged_kv_last_page_len += limited_accept_nums.flatten().to(torch.int32)
+        if not use_tp:
+            draft.cachelens = draft.cachelens - args.gamma
+            draft.paged_kv_last_page_len = draft.paged_kv_last_page_len - args.gamma
+            draft.cachelens += limited_accept_nums.flatten().to(torch.int32)
+            draft.paged_kv_last_page_len += limited_accept_nums.flatten().to(torch.int32)
+        else:
+            if rank in args.draft_rank_group:
+                draft.cachelens = draft.cachelens - args.gamma
+                draft.paged_kv_last_page_len = draft.paged_kv_last_page_len - args.gamma
+                draft.cachelens += limited_accept_nums.flatten().to(torch.int32)
+                draft.paged_kv_last_page_len += limited_accept_nums.flatten().to(torch.int32)
 
 
         # print("Target: ",engine.cachelens, engine.paged_kv_last_page_len)
