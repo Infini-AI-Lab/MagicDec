@@ -69,8 +69,6 @@ vocab_size = engine.model.config.vocab_size
 if args.compile:
     engine.compile()
 engine.setup_caches(max_batch_size=BATCH_SIZE, max_seq_length=MAX_LEN_TARGET, draft_budget=args.draft_budget, window_size=args.window_size)
-# target_sample = cuda_graph_for_sampling_argmax_batch(device=DEVICE, dtype=DTYPE, batch_size=BATCH_SIZE, idx_len=args.gamma+1, dim=vocab_size)
-# draft_sample = cuda_graph_for_sampling_argmax_batch(device=DEVICE, dtype=DTYPE, batch_size=BATCH_SIZE, idx_len=1, dim=vocab_size)
 
 # Load dataset
 tokenizer = AutoTokenizer.from_pretrained(args.model_name)
@@ -110,8 +108,6 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
     num_nodes = torch.zeros(BATCH_SIZE,device=DEVICE).long()
     num_nodes += input_ids.shape[1]
 
-    # logits = engine.encode(input_ids=input_ids)[:,-1]
-    # tokens_buffer[:,:1] = sampling_argmax_batch(logits=logits)
     tokens_buffer[:, :1] = engine.encode(input_ids=input_ids)[:,-1:]
 
     torch.cuda.synchronize()
@@ -124,7 +120,6 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
             t1 = time.time()
 
         for i in range(args.gamma):
-            # tokens_buffer[:,i+1:i+2] = draft_sample(engine.speculate(tokens_buffer[:, i].view(-1,1)))
             tokens_buffer[:,i+1:i+2] = engine.speculate(tokens_buffer[:, i].view(-1,1))
 
         if benchmark:
@@ -133,7 +128,6 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
             draft_time+=t2-t1
 
         # Target Verification
-        # target_logits = engine.verify(tokens_buffer)
         target_tokens = engine.verify(tokens_buffer)
 
         if benchmark:
@@ -141,7 +135,6 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
             t3 = time.time()
             target_time+=t3-t2
 
-        # target_tokens = target_sample(target_logits)
         target_steps+=1
 
     # Verification
