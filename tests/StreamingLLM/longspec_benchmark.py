@@ -35,11 +35,10 @@ parser.add_argument('--seed', type=int, default=123, help='Random seed.')
 parser.add_argument('--printoutput', action='store_true', help='Whether to compile the model.')
 parser.add_argument('--benchmark', action='store_true', help='Whether to compile the model.')
 
-# Assert max length <= max context length
-
 args = parser.parse_args()
 assert args.prefix_len < args.max_len
 assert (args.max_len + 127) // 128 == args.prefix_len // 128 + 1
+assert (args.draft_budget - 1) % 128 == 0
 
 draft_tp = len(args.draft_rank_group) > 1
 

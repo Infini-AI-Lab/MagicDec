@@ -41,10 +41,11 @@ parser.add_argument('--benchmark', action='store_true', help='Whether to compile
 args = parser.parse_args()
 assert args.prefix_len < args.max_len
 assert (args.max_len + 127) // 128 == args.prefix_len // 128 + 1
+if args.draft_budget != -1:
+    assert (args.prefix_len - args.window_size) % 128 == 0
+    assert (args.draft_budget - 1) % 128 == 0
 
 draft_tp = len(args.draft_rank_group) > 1
-
-# assert args.prefix_len + args.gen_len + args.gamma + 1 <= 4096
 
 # Init model parallelism
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
