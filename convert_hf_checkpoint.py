@@ -91,16 +91,27 @@ def convert_hf_checkpoint(
         "model.norm.weight": "norm.weight",
         "lm_head.weight": "output.weight",
     }
+    if "qwen" in model_name.lower():
+        weight_map.update({
+            "model.layers.{}.self_attn.q_proj.bias": "layers.{}.attention.wq.bias",
+            "model.layers.{}.self_attn.k_proj.bias": "layers.{}.attention.wk.bias",
+            "model.layers.{}.self_attn.v_proj.bias": "layers.{}.attention.wv.bias",
+        })
     if model_map_json != None:
         bin_files = {checkpoint_dir / bin for bin in bin_index["weight_map"].values()}
 
     def permute(w, n_head):
-        dim = config.dim
-        return (
-            w.view(n_head, 2, config.head_dim // 2, dim)
-            .transpose(1, 2)
-            .reshape(config.head_dim * n_head, dim)
-        )
+        if len(w.shape) == 2:
+            # weight term
+            dim = config.dim
+            return (
+                w.view(n_head, 2, config.head_dim // 2, dim)
+                .transpose(1, 2)
+                .reshape(config.head_dim * n_head, dim)
+            )
+        else:
+            # bias term
+            return w.view(n_head, 2, config.head_dim // 2).transpose(1, 2).reshape(config.head_dim * n_head)
 
     merged_result = {}
     if model_map_json != None:

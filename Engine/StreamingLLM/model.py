@@ -31,6 +31,7 @@ class ModelArgs:
     low_freq_factor: int = None # added new
     high_freq_factor: int = None  # added new
     original_max_position_embeddings: int = None   # added new
+    qkv_bias: bool = False
 
     def __post_init__(self):
         if self.n_local_heads == -1:
@@ -68,6 +69,13 @@ transformer_configs = {
     "llama-3.1-8b": dict(block_size=131072, n_layer=32, n_head=32, n_local_heads=8, dim=4096, intermediate_size=14336, vocab_size=128256, rope_base=500000.0, scaling_factor=8, high_freq_factor=4, low_freq_factor=1, original_max_position_embeddings=8192),
     "llama-3.1-70b": dict(block_size=131072, n_layer=80, n_head=64, n_local_heads=8, dim=8192, intermediate_size=28672, vocab_size=128256, rope_base=500000.0, scaling_factor=8, high_freq_factor=4, low_freq_factor=1, original_max_position_embeddings=8192),
     "llama-3.2-1b": dict(block_size=131072, n_layer=16, n_head=32, n_local_heads=8, dim=2048, intermediate_size=8192, vocab_size=128256, rope_base=500000.0, scaling_factor=32, high_freq_factor=4, low_freq_factor=1, original_max_position_embeddings=8192),
+    "Qwen2.5-7b": dict(block_size=131072, n_layer=28, n_head=28, n_local_heads=4, dim=3584, intermediate_size=18944, vocab_size=152064, rope_base=1000000.0, qkv_bias=True, norm_eps=1e-6),
+    "Qwen2.5-14b": dict(block_size=131072, n_layer=48, n_head=40, n_local_heads=8, dim=5120, intermediate_size=13824, vocab_size=152064, rope_base=1000000.0, qkv_bias=True, norm_eps=1e-6),
+    "Qwen2.5-32b": dict(block_size=131072, n_layer=64, n_head=40, n_local_heads=8, dim=5120, intermediate_size=27648, vocab_size=152064, rope_base=1000000.0, qkv_bias=True, norm_eps=1e-6),
+    "Yi-1.5-6b": dict(block_size=4096, n_layer=32, n_head=32, n_local_heads=4, dim=4096, intermediate_size=11008, vocab_size=64000, rope_base=500000.0),
+    "Yi-1.5-34b-32k": dict(block_size=32768, n_layer=60, n_head=56, n_local_heads=8, dim=7168, intermediate_size=20480, vocab_size=64000, rope_base=500000.0),
+    "Mistral-7B-v0.1": dict(n_layer=32, n_head=32, n_local_heads=8, dim=4096, intermediate_size=14336, vocab_size=32000),
+    "Mistral-7B-v0.3": dict(n_layer=32, n_head=32, n_local_heads=8, dim=4096, intermediate_size=14336, vocab_size=32768),
 }
 
 class KVCache(nn.Module):
@@ -315,7 +323,7 @@ class Attention(nn.Module):
 
         total_head_dim = (config.n_head + 2 * config.n_local_heads) * config.head_dim
         # key, query, value projections for all heads, but in a batch
-        self.wqkv = nn.Linear(config.dim, total_head_dim, bias=False)
+        self.wqkv = nn.Linear(config.dim, total_head_dim, bias=config.qkv_bias)
         self.wo = nn.Linear(config.dim, config.dim, bias=False)
         self.kv_cache: KVCache = None
         self.process_group = None
@@ -336,6 +344,12 @@ class Attention(nn.Module):
             wk = state_dict.pop(prefix + "wk.weight")
             wv = state_dict.pop(prefix + "wv.weight")
             state_dict[prefix + "wqkv.weight"] = torch.cat([wq, wk, wv])
+        
+        if prefix + "wq.bias" in state_dict:    
+            bq = state_dict.pop(prefix + "wq.bias")
+            bk = state_dict.pop(prefix + "wk.bias")
+            bv = state_dict.pop(prefix + "wv.bias")
+            state_dict[prefix + "wqkv.bias"] = torch.cat([bq, bk, bv])
     
     def verify(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
         bsz, seqlen, _ = x.shape
