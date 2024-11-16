@@ -1,6 +1,6 @@
 import torch
-from MagicDec.Engine.model import Transformer
-from MagicDec.Engine.utils import load_model_draft
+from MagicDec.Engine.SnapKV.model_draft import Transformer
+from MagicDec.Engine.utils import load_model_draft_snapKV
 import flashinfer
 
 class LMBackend_Draft:
@@ -9,37 +9,32 @@ class LMBackend_Draft:
         self.device = device
         self.dec_len = dec_len
         self.model_forward = {}
-        for decode_len in dec_len:
-            self.model_forward[decode_len] = lambda model, x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen: model(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
         self.prefill = lambda model, x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen, is_last=None, draft_paged_kv_indptr=None, draft_paged_kv_indices=None, draft_paged_kv_last_page_len=None: model.prefill(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen, is_last, draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len)
-
         self.cachelens = None
         self.is_compress = False
-        if draft_budget != None:
+        if draft_budget != -1:
             self.is_compress = True
-            self.draft_cachelens = None
-            for decode_len in dec_len:
-                self.model_forward = lambda model, x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen: model.draft_forward(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
-
+            for decode_len in [1,2]:
+                self.model_forward[decode_len] = lambda model, x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen: model.draft_forward(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+        else:
+            for decode_len in [1,2]:
+                self.model_forward[decode_len] = lambda model, x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen: model(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
+                
     def load_model(self, checkpoints: str, use_tp: bool, rank_group=None, group = None):
-        self.model: Transformer = load_model_draft(checkpoint_path=checkpoints, device=self.device, precision=self.dtype, use_tp=use_tp, rank_group=rank_group, group=group)        
+        self.model: Transformer = load_model_draft_snapKV(checkpoint_path=checkpoints, device=self.device, precision=self.dtype, use_tp=use_tp, rank_group=rank_group, group=group)        
 
     @torch.inference_mode()
     def setup_caches(self, max_batch_size: int = 1, max_seq_length: int = 2048, draft_budget = 0, window_size = 32):
-        self.max_length = max_seq_length
         self.batch_size = max_batch_size
         self.cachelens = torch.zeros(max_batch_size, dtype=torch.int32, device=self.device)
-        # Prefill length should be devisible by 128 and plus 1 or window_size
-        # Max Length should be divisible by 128
         page_size = 128
         max_num_pages = max_batch_size * max_seq_length // page_size
         if max_num_pages*page_size < max_batch_size*max_seq_length:
             max_num_pages += max_batch_size
         self.max_num_pages_per_request = max_num_pages // max_batch_size
         self.num_pages_per_request = torch.zeros(max_batch_size, device=self.device, dtype=torch.int32)
-        self.page_size = 128
+        self.page_size = page_size
         self.max_num_pages = max_num_pages
-
 
         # Init Target Attention Backend(Flashinfer)
         self.prefill_buffer = torch.empty(128 * 1024 * 1024, dtype=torch.uint8, device=self.device)
@@ -73,7 +68,6 @@ class LMBackend_Draft:
         # If using speculative decoding, init draft attention backend
         else:
             self.draft_budget = draft_budget
-            self.draft_cachelens = torch.zeros(max_batch_size, dtype=torch.int32, device=self.device)
             self.draft_buffer = torch.empty(128 * 1024 * 1024, dtype=torch.uint8, device=self.device)
             self.draft_num_pages = (draft_budget//page_size + 1)*max_batch_size
             self.draft_paged_kv_indptr = torch.arange(max_batch_size+1, dtype=torch.int32, device=self.device)*(draft_budget//page_size + 1)
@@ -120,22 +114,26 @@ class LMBackend_Draft:
             dec_len = input_ids.shape[1]
             self.pre_decode(dec_len=dec_len)
 
-            logits = self.model_forward[dec_len](
-                model=self.model, 
-                x=input_ids,
-                input_pos=self.cachelens, 
-                kv_append_indptr = self.qo_indptr*dec_len, kv_page_indices = self.paged_kv_indices, kv_page_indptr= self.paged_kv_indptr, kv_page_lastlen = self.paged_kv_last_page_len)
+            if self.is_compress:
+                logits = self.model_forward[dec_len](
+                    model=self.model, 
+                    x=input_ids,
+                    input_pos=self.cachelens, 
+                    kv_append_indptr = self.qo_indptr*dec_len, kv_page_indices = self.draft_paged_kv_indices, kv_page_indptr= self.draft_paged_kv_indptr, kv_page_lastlen = self.draft_paged_kv_last_page_len)
+            else:
+                logits = self.model_forward[dec_len](
+                    model=self.model, 
+                    x=input_ids,
+                    input_pos=self.cachelens, 
+                    kv_append_indptr = self.qo_indptr*dec_len, kv_page_indices = self.paged_kv_indices, kv_page_indptr= self.paged_kv_indptr, kv_page_lastlen = self.paged_kv_last_page_len)
             
             if cachelen_update == None:
-                if self.is_compress:
-                    self.draft_cachelens += dec_len
-                else:
-                    self.cachelens += dec_len
+                self.cachelens += dec_len
             else:
+                self.cachelens += cachelen_update.to(torch.int32)
                 if self.is_compress:
-                    self.draft_cachelens += cachelen_update.to(torch.int32)
+                    self.draft_paged_kv_last_page_len = self.draft_paged_kv_last_page_len - dec_len + cachelen_update.to(torch.int32).flatten()
                 else:
-                    self.cachelens += cachelen_update.to(torch.int32)
                     self.paged_kv_last_page_len = self.paged_kv_last_page_len - dec_len + cachelen_update.to(torch.int32).flatten()
             
             if benchmark:
@@ -206,11 +204,7 @@ class LMBackend_Draft:
                     input_pos=self.cachelens,
                     kv_append_indptr = self.qo_indptr*dec_len, kv_page_indices = self.paged_kv_indices, kv_page_indptr= self.paged_kv_indptr, kv_page_lastlen = self.paged_kv_last_page_len, 
                 )
-            self.cachelens += dec_len
-            
-        if self.is_compress:
-            self.draft_cachelens.copy_(self.cachelens)
-        
+            self.cachelens += dec_len  
         return logits
     
     def pre_encode(self, dec_len):
@@ -246,7 +240,6 @@ class LMBackend_Draft:
         self.paged_kv_last_page_len = torch.zeros((self.batch_size), dtype=torch.int32, device=self.device)
         self.num_pages_per_request = torch.zeros(self.batch_size, device=self.device, dtype=torch.int32)
         if self.is_compress:
-            self.draft_cachelens.zero_()
             self.draft_paged_kv_indptr = torch.arange(self.batch_size+1, dtype=torch.int32, device=self.device)*(self.draft_budget//self.page_size + 1)
             self.draft_paged_kv_indices = torch.arange(self.draft_num_pages, dtype=torch.int32, device=self.device)
             self.draft_paged_kv_last_page_len = torch.ones((self.batch_size), dtype=torch.int32, device=self.device)

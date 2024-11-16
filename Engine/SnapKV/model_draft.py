@@ -114,7 +114,6 @@ class Transformer(nn.Module):
         self.world_size = None
         self.rank = None
         self.process_group = None
-        # self.freqs_cis: Optional[Tensor] = None
 
     def setup_caches(self, num_pages, page_size, spec=False, draft_num_pages = 0, draft_budget = 0, window_size = 32):
 
@@ -124,36 +123,35 @@ class Transformer(nn.Module):
 
         if (self.config.high_freq_factor is not None) and (self.config.low_freq_factor is not None):
             torch.library.define(
-                "mylib::rope",
+                "mylib::draft_rope",
                 "(Tensor q, Tensor k, Tensor indptr, Tensor offsets) -> (Tensor ropeq, Tensor ropek)",
             )
-            @torch.library.impl("mylib::rope", "cuda")
-            def rope(q, k, indptr, offsets):
-                return flashinfer.rope.apply_llama31_rope(q, k, indptr, offsets, interleave=True)
+            @torch.library.impl("mylib::draft_rope", "cuda")
+            def draft_rope(q, k, indptr, offsets):
+                return flashinfer.rope.apply_llama31_rope(q, k, indptr, offsets, interleave=True, rope_scale=self.config.scaling_factor, rope_theta=self.config.rope_base, low_freq_factor=self.config.low_freq_factor, high_freq_factor=self.config.high_freq_factor, old_context_len=self.config.original_max_position_embeddings)
 
-            @torch.library.register_fake("mylib::rope")
-            def rope_abstract(q, k, indptr, offsets):
+            @torch.library.register_fake("mylib::draft_rope")
+            def draft_rope_abstract(q, k, indptr, offsets):
                 return torch.empty_like(q), torch.empty_like(k)
         else:
             torch.library.define(
-                "mylib::rope",
+                "mylib::draft_rope",
                 "(Tensor q, Tensor k, Tensor indptr, Tensor offsets) -> (Tensor ropeq, Tensor ropek)",
             )
-            @torch.library.impl("mylib::rope", "cuda")
-            def rope(q, k, indptr, offsets):
+            @torch.library.impl("mylib::draft_rope", "cuda")
+            def draft_rope(q, k, indptr, offsets):
                 return flashinfer.rope.apply_rope(q, k, indptr, offsets, interleave=True, rope_scale=self.config.scaling_factor, rope_theta=self.config.rope_base)
 
-            @torch.library.register_fake("mylib::rope")
-            def rope_abstract(q, k, indptr, offsets):
+            @torch.library.register_fake("mylib::draft_rope")
+            def draft_rope_abstract(q, k, indptr, offsets):
                 return torch.empty_like(q), torch.empty_like(k)
 
         for b in self.layers:
             b.attention.kv_cache = KVCache(num_pages, page_size, self.config.n_local_heads, head_dim, dtype, spec, draft_num_pages)
-            b.attention.attn_decode = torch.ops.mylib.target_decode
-            b.attention.attn_prefill = torch.ops.mylib.target_prefill
-            b.attention.rope = torch.ops.mylib.rope
+            b.attention.attn_decode = torch.ops.mylib.draft_decode
+            b.attention.attn_prefill = torch.ops.mylib.draft_prefill
+            b.attention.rope = torch.ops.mylib.draft_rope
             if spec:
-                b.attention.attn_draft = torch.ops.mylib.draft_decode
                 b.attention.is_spec = True
                 b.attention.draft_budget = draft_budget
                 b.attention.window_size = window_size
@@ -164,25 +162,6 @@ class Transformer(nn.Module):
         x = self.tok_embeddings(idx)
         for i, layer in enumerate(self.layers):
             x = layer(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
-        x = self.norm(x)
-        logits = self.output(x)
-        # return logits
-        if self.process_group != None:
-            all_max_value = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=logits.dtype, device=logits.device)
-            all_max_indices = torch.zeros((x.shape[0], x.shape[1], self.world_size), dtype=torch.long, device=logits.device)
-            all_max_value[:, :, self.rank], all_max_indices[:, :, self.rank] = torch.max(logits, dim=-1)
-            all_max_indices[:, :, self.rank] += self.rank * logits.shape[-1]
-            dist.all_reduce(all_max_value, group = self.process_group)
-            dist.all_reduce(all_max_indices, group = self.process_group)
-            global_select_indices = torch.argmax(all_max_value, dim=-1)
-            global_indices = torch.gather(all_max_indices, dim=-1, index=global_select_indices.unsqueeze(-1))
-            return global_indices.squeeze(-1)
-        return torch.argmax(logits, dim=-1)
-    
-    def verify(self, idx: Tensor, input_pos: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, draft_kv_page_indices: Tensor, draft_kv_page_indptr: Tensor, draft_kv_page_lastlen: Tensor) -> Tensor:
-        x = self.tok_embeddings(idx)
-        for i, layer in enumerate(self.layers):
-            x = layer.verify(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen, draft_kv_page_indices, draft_kv_page_indptr, draft_kv_page_lastlen)
         x = self.norm(x)
         logits = self.output(x)
         # return logits
@@ -254,11 +233,6 @@ class TransformerBlock(nn.Module):
         out = h + self.feed_forward(self.ffn_norm(h))
         return out
     
-    def verify(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, draft_kv_page_indices: Tensor, draft_kv_page_indptr: Tensor, draft_kv_page_lastlen: Tensor) -> Tensor:
-        h = x + self.attention.verify(self.attention_norm(x), offsets, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen, draft_kv_page_indices, draft_kv_page_indptr, draft_kv_page_lastlen)
-        out = h + self.feed_forward(self.ffn_norm(h))
-        return out
-    
     def draft_forward(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
         h = x + self.attention.draft_forward(self.attention_norm(x), offsets, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
         out = h + self.feed_forward(self.ffn_norm(h))
@@ -283,7 +257,6 @@ class Attention(nn.Module):
         self.process_group = None
         self.attn_decode = None
         self.attn_prefill = None
-        self.attn_draft = None
         self.rope = None
         self.is_spec = False
 
@@ -318,24 +291,7 @@ class Attention(nn.Module):
         y = y.contiguous().view(bsz, seqlen, self.dim)
         y = self.wo(y)
         if self.process_group != None:
-            dist.all_reduce(y, group = self.process_group)
-        return y
-    
-    def verify(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, draft_kv_page_indices: Tensor, draft_kv_page_indptr: Tensor, draft_kv_page_lastlen: Tensor) -> Tensor:
-        bsz, seqlen, _ = x.shape
-        kv_size = self.n_local_heads * self.head_dim
-        q, k, v = self.wqkv(x).split([self.dim, kv_size, kv_size], dim=-1)
-        q = q.view(bsz * seqlen, self.n_head, self.head_dim)
-        k = k.view(bsz * seqlen, self.n_local_heads, self.head_dim)
-        v = v.contiguous().view(bsz * seqlen, self.n_local_heads, self.head_dim)
-        q, k = self.rope(q, k, kv_append_indptr, offsets)
-        kv_cache = self.kv_cache.update_target(k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
-        self.kv_cache.update_draft(k, v, kv_append_indptr, draft_kv_page_indices, draft_kv_page_indptr, draft_kv_page_lastlen)
-        y = self.attn_decode(q, kv_cache)
-        y = y.contiguous().view(bsz, seqlen, self.dim)
-        y = self.wo(y)
-        if self.process_group != None:
-            dist.all_reduce(y, group = self.process_group)
+            dist.all_reduce(y, group=self.process_group)
         return y
     
     def draft_forward(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor) -> Tensor:
@@ -347,11 +303,11 @@ class Attention(nn.Module):
         v = v.contiguous().view(bsz * seqlen, self.n_local_heads, self.head_dim)
         q, k = self.rope(q, k, kv_append_indptr, offsets)
         kv_cache = self.kv_cache.update_draft(k, v, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
-        y = self.attn_draft(q, kv_cache)
+        y = self.attn_decode(q, kv_cache)
         y = y.contiguous().view(bsz, seqlen, self.dim)
         y = self.wo(y)
         if self.process_group != None:
-            dist.all_reduce(y, group = self.process_group)
+            dist.all_reduce(y, group=self.process_group)
         return y
 
     def prefill(self, x: Tensor, offsets: Tensor, kv_append_indptr: Tensor, kv_page_indices: Tensor, kv_page_indptr: Tensor, kv_page_lastlen: Tensor, is_last = False ,draft_paged_kv_indptr=None, draft_paged_kv_indices=None, draft_paged_kv_last_page_len=None) -> Tensor:
@@ -369,7 +325,7 @@ class Attention(nn.Module):
         y = y.contiguous().view(bsz, seqlen, self.dim)
         y = self.wo(y)
         if self.process_group != None:
-            dist.all_reduce(y, group = self.process_group)
+            dist.all_reduce(y, group=self.process_group)
         return y
 
     def gen_draft_kv(self, q, k, v, bsz, seqlen, context_len, kv_append_indptr, draft_paged_kv_indptr, draft_paged_kv_indices, draft_paged_kv_last_page_len):
@@ -437,7 +393,7 @@ class FeedForward(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         y = self.w2(F.silu(self.w1(x)) * self.w3(x))
         if self.process_group != None:
-            dist.all_reduce(y, group = self.process_group)
+            dist.all_reduce(y, group=self.process_group)
         return y
 
 

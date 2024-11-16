@@ -1,6 +1,6 @@
 import torch
-from MagicDec.Engine.model import Transformer
-from MagicDec.Engine.utils import load_model
+from MagicDec.Engine.SnapKV.model import Transformer
+from MagicDec.Engine.utils import load_model_snapKV
 import flashinfer
 
 class LMBackend:
@@ -19,7 +19,7 @@ class LMBackend:
             self.draft_forward = lambda model, x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen: model.draft_forward(x, input_pos, kv_append_indptr, kv_page_indices, kv_page_indptr, kv_page_lastlen)
 
     def load_model(self, checkpoints: str, use_tp: bool, rank_group=None, group = None):
-        self.model: Transformer = load_model(checkpoint_path=checkpoints, device=self.device, precision=self.dtype, use_tp=use_tp, rank_group=rank_group, group=group)        
+        self.model: Transformer = load_model_snapKV(checkpoint_path=checkpoints, device=self.device, precision=self.dtype, use_tp=use_tp, rank_group=rank_group, group=group)        
 
     @torch.inference_mode()
     def setup_caches(self, max_batch_size: int = 1, max_seq_length: int = 2048, draft_budget = 0, window_size = 32):

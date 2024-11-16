@@ -193,8 +193,8 @@ def setup_seed(seed):
      random.seed(seed)
      torch.backends.cudnn.deterministic = True
 
-def load_model(checkpoint_path, device, precision, use_tp, rank_group=None, group=None):
-    from MagicDec.Engine.model import Transformer
+def load_model_snapKV(checkpoint_path, device, precision, use_tp, rank_group=None, group=None):
+    from MagicDec.Engine.SnapKV.model import Transformer
     with torch.device('meta'):
         model = Transformer.from_name(checkpoint_path.parent.name)
 
@@ -218,8 +218,8 @@ def load_model(checkpoint_path, device, precision, use_tp, rank_group=None, grou
     return model.eval()
 
 
-def load_model_draft(checkpoint_path, device, precision, use_tp, rank_group=None, group=None):
-    import MagicDec.Engine.model_draft as draft
+def load_model_draft_snapKV(checkpoint_path, device, precision, use_tp, rank_group=None, group=None):
+    import MagicDec.Engine.SnapKV.model_draft as draft
     with torch.device('meta'):
         model = draft.Transformer.from_name(checkpoint_path.parent.name)
     checkpoint = torch.load(str(checkpoint_path), mmap=True, weights_only=True)
@@ -235,10 +235,35 @@ def load_model_draft(checkpoint_path, device, precision, use_tp, rank_group=None
     model = model.to(device=device, dtype=precision)
     return model.eval()
 
-def load_model_selfspec(checkpoint_path, device, precision, use_tp, rank_group=None, group=None):
-    import MagicDec.Engine.model_selfspec as selfspec
+def load_model_streamingLLM(checkpoint_path, device, precision, use_tp, rank_group=None, group=None):
+    from MagicDec.Engine.StreamingLLM.model import Transformer
     with torch.device('meta'):
-        model = selfspec.Transformer.from_name(checkpoint_path.parent.name)
+        model = Transformer.from_name(checkpoint_path.parent.name)
+
+    if "int8" in str(checkpoint_path):
+        print("Using int8 weight-only quantization!")
+        from MagicDec.Engine.quantize import WeightOnlyInt8QuantHandler
+        simple_quantizer = WeightOnlyInt8QuantHandler(model)
+        model = simple_quantizer.convert_for_runtime()
+
+    checkpoint = torch.load(str(checkpoint_path), mmap=True, weights_only=True)
+    if "model" in checkpoint and "stories" in str(checkpoint_path):
+        checkpoint = checkpoint["model"]
+    model.load_state_dict(checkpoint, assign=True)
+
+    if use_tp:
+        from MagicDec.Engine.tp import apply_tp
+        print("Applying tensor parallel to model ...")
+        apply_tp(model, rank_group, group=group)
+
+    model = model.to(device=device, dtype=precision)
+    return model.eval()
+
+
+def load_model_draft_streamingLLM(checkpoint_path, device, precision, use_tp, rank_group=None, group=None):
+    import MagicDec.Engine.StreamingLLM.model_draft as draft
+    with torch.device('meta'):
+        model = draft.Transformer.from_name(checkpoint_path.parent.name)
     checkpoint = torch.load(str(checkpoint_path), mmap=True, weights_only=True)
     if "model" in checkpoint and "stories" in str(checkpoint_path):
         checkpoint = checkpoint["model"]

@@ -88,7 +88,9 @@ torchrun --standalone --nproc_per_node=8 tests/selfspec_benchmark.py --rank_grou
 ENABLE_INTRA_NODE_COMM=1 torchrun --standalone --nproc_per_node=8 tests/selfspec_benchmark.py --rank_group 0 1 2 3 4 5 6 7 --benchmark --compile --draft_budget 2049 --B 128 --prefix_len 32032 --max_len 32128 --gamma 6
 torchrun --standalone --nproc_per_node=8 tests/selfspec_benchmark.py --rank_group 0 1 2 3 4 5 6 7 --benchmark --compile --draft_budget 2049 --B 128 --prefix_len 32032 --max_len 32128 --gamma 7
 
+torchrun --standalone --nproc_per_node=1 tests/StreamingLLM/longspec_benchmark.py --rank_group 0 --draft_rank_group 0 --benchmark --draft_budget 2049 --B 16 --prefix_len 32001 --max_len 32128 --gamma 1
 
+srun --overlap --pty --jobid 1834212 torchrun --standalone --nproc_per_node=1 tests/SnapKV/longspec_benchmark.py --rank_group 0 --draft_rank_group 0 --benchmark --draft_budget 513 --B 16 --prefix_len 8065 --max_len 8192 --gamma 1
 
 
 torchrun --standalone --nproc_per_node=8 tests/baseline_benchmark.py --compile --rank_group 0 1 2 3 4 5 6 7 --B 32 --prefix_len 64032 --max_len 64128
