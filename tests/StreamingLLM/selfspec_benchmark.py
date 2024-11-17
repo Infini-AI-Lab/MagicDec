@@ -42,10 +42,16 @@ global print
 from MagicDec.Engine.tp import init_dist
 use_tp = len(args.rank_group) > 1
 global_group = None
+rank = 0
 if use_tp:
     rank, global_group = init_dist()
     if rank != args.rank_group[0]:
         print = lambda *args, **kwargs: None
+
+if rank == 0:
+    with open("result.txt", "a") as file:
+        file.write(f"Selfspec: Prefix:{args.prefix_len}; Bsz:{args.B}; Gamma:{args.gamma}; Draft budget:{args.draft_budget}\n")
+
 
 setup_seed(args.seed)
 print(f"Using device={DEVICE}")
@@ -242,7 +248,7 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
     print("total time :{:.5f}s, time per iter :{:.5f}s, decoding step: {}, large model step: {}".format(total_time, total_time / target_steps, num_gen_tokens, target_steps))
     if benchmark:
         print("target time :{:.5f}s, draft time :{:.5f}s, verify loop : {}, avg generate len per sentence: {}".format(target_time/target_steps, draft_time / target_steps, verify_loop/target_steps, num_gen_tokens/target_steps/BATCH_SIZE))
-    if step < 10:   # TODO: revert to 10?
+    if step < 5:   # TODO: revert to 10?
         total_time = 0.0
         num_gen_tokens = 0
         target_steps = 0
@@ -252,3 +258,8 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
             verify_loop = 0.0
     if use_tp:
         dist.barrier()
+
+if rank == 0:
+    with open("result.txt", "a") as file:
+        file.write("total time :{:.5f}s, time per iter :{:.5f}s, decoding step: {}, large model step: {}, avg latency: {} \n".format(total_time, total_time / target_steps, num_gen_tokens, target_steps, total_time / num_gen_tokens * BATCH_SIZE))
+        file.write("target time :{:.5f}s, draft time :{:.5f}s, verify loop : {}, avg generate len per sentence: {} \n".format(target_time/target_steps, draft_time / target_steps, verify_loop/target_steps, num_gen_tokens/target_steps/BATCH_SIZE))
