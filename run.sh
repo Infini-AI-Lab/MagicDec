@@ -1,4 +1,4 @@
-# ENABLE_INTRA_NODE_COMM=1 torchrun --standalone --nproc_per_node=8 tests/baseline_benchmark.py --compile --rank_group 0 1 2 3 4 5 6 7 --B 1 --prefix_len 257 --max_len 384
+ENABLE_INTRA_NODE_COMM=1 torchrun --standalone --nproc_per_node=8 tests/baseline_benchmark.py --compile --rank_group 0 1 2 3 4 5 6 7 --B 1 --prefix_len 257 --max_len 384
 # ENABLE_INTRA_NODE_COMM=1 torchrun --standalone --nproc_per_node=8 tests/baseline_benchmark.py --compile --rank_group 0 1 2 3 4 5 6 7 --B 16 --prefix_len 257 --max_len 384
 # ENABLE_INTRA_NODE_COMM=1 torchrun --standalone --nproc_per_node=8 tests/baseline_benchmark.py --compile --rank_group 0 1 2 3 4 5 6 7 --B 32 --prefix_len 257 --max_len 384
 # ENABLE_INTRA_NODE_COMM=1 torchrun --standalone --nproc_per_node=8 tests/baseline_benchmark.py --compile --rank_group 0 1 2 3 4 5 6 7 --B 64 --prefix_len 257 --max_len 384
@@ -13,6 +13,13 @@
 # ENABLE_INTRA_NODE_COMM=1 torchrun --standalone --nproc_per_node=8 tests/baseline_benchmark.py --compile --rank_group 0 1 2 3 4 5 6 7 --B 128 --prefix_len 8193 --max_len 8320
 # ENABLE_INTRA_NODE_COMM=1 torchrun --standalone --nproc_per_node=8 tests/baseline_benchmark.py --compile --rank_group 0 1 2 3 4 5 6 7 --B 256 --prefix_len 8193 --max_len 8320
 # ENABLE_INTRA_NODE_COMM=1 torchrun --standalone --nproc_per_node=8 tests/baseline_benchmark.py --compile --rank_group 0 1 2 3 4 5 6 7 --B 480 --prefix_len 8193 --max_len 8320
+
+torchrun --standalone --nproc_per_node=8 tests/baseline_benchmark.py --compile --rank_group 0 1 2 3 4 5 6 7 --B 32 --prefix_len 32769 --max_len 32896 --model checkpoints/meta-llama/Meta-Llama-3.1-8B/model.pth
+torchrun --standalone --nproc_per_node=4 tests/StreamingLLM/longspec_benchmark.py --compile --rank_group 0 1 2 3 4 5 6 7 --draft_rank_group 0 1 2 3 4 5 6 7 --B 16 --prefix_len 32769 --max_len 32896 --benchmark --gamma 2 --draft_budget 513
+python download.py --repo_id meta-llama/Llama-3.2-1B --out_dir checkpoints/meta-llama/Llama-3.2-1B
+python convert_hf_checkpoint.py --checkpoint_dir checkpoints/meta-llama/Llama-3.2-1B
+torchrun --standalone --nproc_per_node=8 tests/StreamingLLM/longspec_benchmark.py --model checkpoints/meta-llama/Llama-3.2-1B/model.pth --target checkpoints/meta-llama/Meta-Llama-3.1-8B/model.pth --compile --rank_group 0 1 2 3 4 5 6 7 --draft_rank_group 0 1 2 3 4 5 6 7 --B 32 --prefix_len 32769 --max_len 32896 --benchmark --gamma 2 --draft_budget 513
+torchrun --standalone --nproc_per_node=8 tests/SnapKV/selfspec_benchmark.py --compile --rank_group 0 1 2 3 4 5 6 7 --B 32 --prefix_len 32032 --max_len 32128 --benchmark --gamma 6 --draft_budget 2049 --model checkpoints/meta-llama/Meta-Llama-3.1-8B/model.pth
 
 # ENABLE_INTRA_NODE_COMM=1 torchrun --standalone --nproc_per_node=8 tests/SnapKV/longspec_benchmark.py --compile --rank_group 0 1 2 3 4 5 6 7 --draft_rank_group 0 1 2 3 4 5 6 7 --B 128 --prefix_len 257 --max_len 384 --benchmark --gamma 2
 # ENABLE_INTRA_NODE_COMM=1 torchrun --standalone --nproc_per_node=8 tests/SnapKV/longspec_benchmark.py --compile --rank_group 0 1 2 3 4 5 6 7 --draft_rank_group 0 1 2 3 4 5 6 7 --B 256 --prefix_len 257 --max_len 384 --benchmark --gamma 1

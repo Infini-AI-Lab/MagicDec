@@ -25,7 +25,10 @@
 <br>
 
 ## Update
-Happy to share the latest update of MagicDec. Now MagicDec integerates flashinfer and paged attention to further accelerate inference. We add support of SnapKV-based drafting for higher speculation quality. Please make sure PyTorch version greater than 2.5 to use the new features like custom all-reduce can be used.
+ - Supports flashinfer and paged attention to further accelerate inference.
+ - Supports SnapKV-based drafting for higher speculation quality.
+ - Supppots Qwen2.5-[7B,14B,32B], Yi-1.5-[6B,34B], Mistral-7B-v0.1 and Mistral-7B-v0.1
+ - Please make sure PyTorch version greater than 2.5 to use the new features like custom all-reduce.
 
 ## Installation
 
@@ -39,7 +42,7 @@ pip install flashinfer -i https://flashinfer.ai/whl/cu121/torch2.4/
 ```
 
 ### Prepare Checkpoints
-Currently, we support [Llama-2-7b](https://huggingface.co/meta-llama/Llama-2-7b-hf) and its long context variant [Llama-2-7b-32k](https://huggingface.co/togethercomputer/LLaMA-2-7B-32K), [Llama-2-13b](https://huggingface.co/meta-llama/Llama-2-13b-hf), [Llama-2-70b](https://huggingface.co/meta-llama/Llama-2-70b-hf), [Llama-3-8b](https://huggingface.co/meta-llama/Meta-Llama-3-8B), [Llama-3-70b](https://huggingface.co/meta-llama/Meta-Llama-3-70B), [llama-68m](https://huggingface.co/JackFram/llama-68m), [TinyLlama](https://huggingface.co/TinyLlama/TinyLlama_v1.1), [Llama-3.1-8b](https://huggingface.co/meta-llama/Meta-Llama-3.1-8B), [Llama-3.1-70b](https://huggingface.co/meta-llama/Llama-3.1-70B) and [Llama-3.2-1b](https://huggingface.co/meta-llama/Llama-3.2-1B).
+Currently, we support [Llama-2-7b](https://huggingface.co/meta-llama/Llama-2-7b-hf) and its long context variant [Llama-2-7b-32k](https://huggingface.co/togethercomputer/LLaMA-2-7B-32K), [Llama-2-13b](https://huggingface.co/meta-llama/Llama-2-13b-hf), [Llama-2-70b](https://huggingface.co/meta-llama/Llama-2-70b-hf), [Llama-3-8b](https://huggingface.co/meta-llama/Meta-Llama-3-8B), [Llama-3-70b](https://huggingface.co/meta-llama/Meta-Llama-3-70B), [llama-68m](https://huggingface.co/JackFram/llama-68m), [TinyLlama](https://huggingface.co/TinyLlama/TinyLlama_v1.1), [Llama-3.1-8b](https://huggingface.co/meta-llama/Meta-Llama-3.1-8B), [Llama-3.1-70b](https://huggingface.co/meta-llama/Llama-3.1-70B), [Llama-3.2-1b](https://huggingface.co/meta-llama/Llama-3.2-1B), Qwen2.5-[7B,14B,32B], Yi-1.5-[6B,34B], Mistral-7B-v0.1 and Mistral-7B-v0.1.
 
 We can first download the checkpoints we need through `download.py`. The `--repo_id` should be set to the repository ID to download from. The `--hf_token` should be your HuggingFace API token. The `--out_dir` should be the directory you want to save the checkpoint.
 ```bash
@@ -59,7 +62,7 @@ ENABLE_INTRA_NODE_COMM=1 torchrun --standalone --nproc_per_node=8 tests/baseline
 ```
 
 ### Standalone Draft
-For standalone draft experiment, we use `--target` and `--model` to set the target and draft checkpoint. `--model_name` should be set to the repo id of target model, which will used to load the corresponding tokenizer. `--rank_group` should be set to the GPU id we want to do tensor parallelism for the target model, and `--draft_rank_group` should be set to the GPU id we want to do TP for the draft model. `--draft_budget` should be set to the KV budget for the draft model. Set `--draft_budget` to -1 to disable KV compression of draft (Use full KV).
+For standalone draft experiment, we use `--target` and `--model` to set the target and draft checkpoint. `--model_name` should be set to the repo id of target model, which will used to load the corresponding tokenizer. `--rank_group` should be set to the GPU id we want to do tensor parallelism for the target model, and `--draft_rank_group` should be set to the GPU id we want to do TP for the draft model. `--draft_budget` should be set to the KV budget for the draft model. Set `--draft_budget` of `StreamingLLM/longspec_benchmark.py` to -1 to disable KV compression of draft model (Use full KV, the original speculative decoding).
 
 #### SnapKV-based Drafting
 ```bash
@@ -81,7 +84,7 @@ ENABLE_INTRA_NODE_COMM=1 torchrun --standalone --nproc_per_node=8 tests/SnapKV/s
 
 #### StreamingLLM-based Drafting
 ```bash
-ENABLE_INTRA_NODE_COMM=1 torchrun --standalone --nproc_per_node=8 tests/SnapKV/selfspec_benchmark.py --model checkpoints/meta-llama/Meta-Llama-3.1-8B/model.pth --model_name meta-llama/Meta-Llama-3.1-8B --rank_group 0 1 2 3 4 5 6 7 --gamma 3 --B 64 --prefix_len 16032 --gen_len 16128 --draft_budget 257 --benchmark --compile
+ENABLE_INTRA_NODE_COMM=1 torchrun --standalone --nproc_per_node=8 tests/StreamingLLM/selfspec_benchmark.py --model checkpoints/meta-llama/Meta-Llama-3.1-8B/model.pth --model_name meta-llama/Meta-Llama-3.1-8B --rank_group 0 1 2 3 4 5 6 7 --gamma 3 --B 64 --prefix_len 16032 --gen_len 16128 --draft_budget 257 --benchmark --compile
 ```
 
 ## Citation
@@ -95,4 +98,3 @@ If you find MagicDec useful or relevant to your project and research, please kin
   year={2024}
 }
 ```
-
