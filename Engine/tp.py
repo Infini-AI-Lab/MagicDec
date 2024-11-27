@@ -15,7 +15,7 @@ else:
     # Distributed is not supported on MacOS
     funcol = None
 
-from MagicDec.Engine.model import Attention, FeedForward, Transformer
+from MagicDec.Engine.SnapKV.model import Attention, FeedForward, Transformer
 from itertools import accumulate
 
 
@@ -55,7 +55,7 @@ def init_dist(draft_ranks=None):
     global_rank = _get_global_rank()
     world_size = _get_world_size()
     torch.cuda.set_device(global_rank)
-    dist.init_process_group(backend="nccl", rank=global_rank, world_size=world_size)
+    dist.init_process_group(backend="nccl", rank=global_rank, world_size=world_size, device_id=torch.device(f'cuda:{global_rank}'))
     global_group = dist.group.WORLD
     if draft_ranks != None:
         draft_group = dist.new_group(draft_ranks)
@@ -181,7 +181,7 @@ def _apply_tp_attn(attn: Attention, rank_group, config, group) -> None:
     #     output, "sum", group))
 
 
-def _apply_tp_Transformer(Transformer: Transformer, rank_group) -> None:
+def _apply_tp_Transformer(Transformer: Transformer, rank_group, process_group) -> None:
     # overwrite config before Transformer.setup_cache is called
     num_heads = Transformer.config.n_head
     num_kv_heads = Transformer.config.n_local_heads
@@ -193,10 +193,14 @@ def _apply_tp_Transformer(Transformer: Transformer, rank_group) -> None:
     Transformer.config.n_head = local_num_heads
     Transformer.config.dim = local_dim
     Transformer.config.n_local_heads = local_num_kv_heads
+    _apply_tp_linear_mlp(Transformer.output, "colwise", rank_group=rank_group)
+    Transformer.process_group = process_group
+    Transformer.world_size = dist.get_world_size(process_group)
+    Transformer.rank = dist.get_rank(process_group)
 
 
 def apply_tp(model: Transformer, rank_group, group) -> None:
-    _apply_tp_Transformer(model, rank_group)
+    _apply_tp_Transformer(model, rank_group, group)
     for block in model.layers:
         # Apply to MLP
         _apply_tp_ffn(block.feed_forward, rank_group, group)

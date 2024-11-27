@@ -1,4 +1,3 @@
-torch==2.4.0
 transformers==4.36.2
 numpy==1.26.3
 protobuf
@@ -7,3 +6,4 @@ datasets==2.16.1
 tiktoken
 packaging
 ninja
+einops

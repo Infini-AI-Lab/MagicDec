@@ -2,109 +2,68 @@ import torch
 import numpy as np
 import random
 from torch.nn.functional import softmax
-from flash_attn import flash_attn_with_kvcache
+import flashinfer
+
+# Copied from transformers.models.llama.modeling_llama.repeat_kv
+def repeat_kv(hidden_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+    """
+    This is the equivalent of torch.repeat_interleave(x, dim=1, repeats=n_rep). The hidden states go from (batch,
+    num_key_value_heads, seqlen, head_dim) to (batch, num_attention_heads, seqlen, head_dim)
+    """
+    batch, num_key_value_heads, slen, head_dim = hidden_states.shape
+    if n_rep == 1:
+        return hidden_states
+    hidden_states = hidden_states[:, :, None, :, :].expand(batch, num_key_value_heads, n_rep, slen, head_dim)
+    return hidden_states.reshape(batch, num_key_value_heads * n_rep, slen, head_dim)
+
+def unrepeat_kv(repeated_states: torch.Tensor, n_rep: int) -> torch.Tensor:
+    """
+    This function reverses the repeat_kv operation. It transforms the repeated tensor
+    back to its original shape: (batch, num_key_value_heads, seqlen, head_dim)
+    from (batch, num_attention_heads, seqlen, head_dim).
+    """
+    batch, num_attention_heads, slen, head_dim = repeated_states.shape
+    if n_rep == 1:
+        return repeated_states
+    num_key_value_heads = num_attention_heads // n_rep
+    return repeated_states.view(batch, num_key_value_heads, n_rep, slen, head_dim).mean(dim=2)
 
 torch.library.define(
-    "mylib::custom_func",
-    "(Tensor q, Tensor(a!) k_cache, Tensor(b!) v_cache, Tensor k, Tensor v, Tensor cache_seqlens) -> Tensor",
+    "mylib::update_kv",
+    "(Tensor k, Tensor v, Tensor kv_append_indptr, Tensor(a!) kv_cache, Tensor kv_page_indices, Tensor kv_page_indptr, Tensor cachelen) -> ()",
 )
 
-@torch.library.impl("mylib::custom_func", "cuda")
-def custom_func(q, k_cache, v_cache, k, v, cache_seqlens):
-    return flash_attn_with_kvcache(
-        q, k_cache, v_cache, k=k, v=v, cache_seqlens=cache_seqlens, causal=True
-    )
+@torch.library.impl("mylib::update_kv", "cuda")
+def update_kv(
+            k,
+            v,
+            kv_append_indptr,
+            kv_cache,
+            kv_page_indices,
+            kv_page_indptr,
+            kv_page_last_len,
+        ):
+        flashinfer.append_paged_kv_cache(
+            k,
+            v,
+            kv_append_indptr,
+            kv_cache,
+            kv_page_indices,
+            kv_page_indptr,
+            kv_page_last_len,
+        )
 
-@torch.library.impl_abstract("mylib::custom_func")
-def custom_func_abstract(q, k_cache, v_cache, k, v, cache_seqlens):
-    return torch.empty_like(q)
-
-torch.library.define(
-    "mylib::custom_func_2",
-    "(Tensor q, Tensor(a!) k_cache, Tensor(a!) v_cache) -> Tensor",
-)
-
-@torch.library.impl("mylib::custom_func_2", "cuda")
-def custom_func_2(q, k_cache, v_cache):
-    return flash_attn_with_kvcache(
-        q, k_cache, v_cache, causal=True
-    )
-
-@torch.library.impl_abstract("mylib::custom_func_2")
-def custom_func_2_abstract(q, k_cache, v_cache):
-    return torch.empty_like(q)
-
-torch.library.define(
-    "mylib::gqa_custom",
-    "(Tensor q, Tensor(a!) k_cache, Tensor(b!) v_cache, Tensor k, Tensor v, Tensor cache_seqlens) -> Tensor",
-)
-
-@torch.library.impl_abstract("mylib::gqa_custom")
-def gqa_custom_abstract(q, k_cache, v_cache, k, v, cache_seqlens):
-    return torch.empty_like(q)
-
-# @torch.library.impl("mylib::gqa_custom", "cuda")
-# def gqa_custom(q, k_cache, v_cache, k, v, cache_seqlens):
-#     B, T, H_q, D = q.size()
-#     H_k = k.size(2)
-#     rep = H_q // H_k
-#     q_reshaped = q.view(B, T, H_k, rep, D).transpose(2, 3).contiguous().view(B, T*rep, H_k, D).contiguous()
-#     y_past, lse_past = flash_attn_with_kvcache(q_reshaped, k_cache, v_cache, None, None, cache_seqlens=cache_seqlens, causal=True, return_softmax_lse=True)
-#     y_new, lse_new = flash_attn_with_kvcache(q, k, v, None, None, None, causal=True, return_softmax_lse=True)     
-#     y_past = y_past.view(B, T, rep, H_k, D).transpose(2, 3).contiguous().view(B, T, H_q, D)
-#     lse_past = rearrange(lse_past, 'b h (t r) -> b t (h r) 1', r=rep).contiguous()
-    
-#     lse_past = lse_past.to(y_past.dtype)
-#     lse_new = lse_new.unsqueeze(-1).transpose(1, 2).to(y_new.dtype)
-    
-#     sumexp_past = torch.exp(lse_past.float())
-#     sumexp_new = torch.exp(lse_new.float())
-
-#     sumexp_total = sumexp_past + sumexp_new
-#     y = (y_past * sumexp_past + y_new * sumexp_new) / sumexp_total
-    
-#     # insert new k and v to k_cache and v_cache, starting from cache_seqlens position
-#     insert_indices = cache_seqlens.unsqueeze(-1) + torch.arange(T, device=cache_seqlens.device).unsqueeze(0)
-#     insert_indices = insert_indices[..., None, None].expand(-1, -1, H_k, D)
-#     k_cache.scatter_(1, insert_indices, k)
-#     v_cache.scatter_(1, insert_indices, v)   
-
-#     return y.to(q.dtype)
-
-@torch.library.impl("mylib::gqa_custom", "cuda")
-def gqa_custom(q, k_cache, v_cache, k, v, cache_seqlens):
-    B, T, H_q, D = q.size()
-    H_k = k.size(2)
-    rep = H_q // H_k
-    q_reshaped = q.view(B, T, H_k, rep, D).transpose(2, 3).contiguous().view(B, T*rep, H_k, D).contiguous()
-    v_new = torch.zeros(B, T*rep, H_k, D, device=q.device, dtype=q.dtype)
-    k_new = torch.zeros_like(v_new)
-    
-    # the extra 1's added to the partition functions
-    # they are of the pattern [0, 1, 2, ..., rep-1, rep-1, rep, rep+1, ..., 2*rep-1, 2*rep-1, 2*rep, ...]
-    offset = torch.ones(rep, device=q.device, dtype=q.dtype)
-    offset[0].zero_()
-    extra = torch.cumsum(offset.repeat(T), dim=0)[None, None, :]
-    insert_indices = torch.arange(0, T*rep, rep, device=q.device)[None, :, None, None].expand(B, -1, H_k, D)
-    k_new.scatter_(1, insert_indices, k)
-    v_new.scatter_(1, insert_indices, v)
-    
-    # print(q_reshaped.shape, k_cache.shape, k_new.shape)
-    y, lse = flash_attn_with_kvcache(q_reshaped, k_cache, v_cache, k_new, v_new, cache_seqlens=cache_seqlens, causal=True, return_softmax_lse=True)
-    
-    extra = extra.expand_as(lse)
-    correction = 1./ (1 - extra * torch.exp(-lse))
-    correction = correction.transpose(1, 2).unsqueeze(-1)
-    y = y * correction.to(y.dtype)
-    y = y.view(B, T, rep, H_k, D).transpose(2, 3).contiguous().view(B, T, H_q, D)
-    
-    # insert new k and v to k_cache and v_cache, starting from cache_seqlens position
-    insert_indices = cache_seqlens.unsqueeze(-1) + torch.arange(T, device=cache_seqlens.device).unsqueeze(0)
-    insert_indices = insert_indices[..., None, None].expand(-1, -1, H_k, D)
-    k_cache.scatter_(1, insert_indices, k)
-    v_cache.scatter_(1, insert_indices, v)   
-
-    return y.to(q.dtype)
+@torch.library.register_fake("mylib::update_kv")
+def update_kv_abstract(
+            k,
+            v,
+            kv_append_indptr,
+            kv_cache,
+            kv_page_indices,
+            kv_page_indptr,
+            kv_page_last_len,
+        ):
+    return None
 
 def get_sampling_logits(logits :torch.Tensor, top_p:float, T: float, replicate = False):
     if replicate:
@@ -234,10 +193,17 @@ def setup_seed(seed):
      random.seed(seed)
      torch.backends.cudnn.deterministic = True
 
-def load_model(checkpoint_path, device, precision, use_tp, rank_group=None, group=None):
-    from MagicDec.Engine.model import Transformer
+def load_model_snapKV(checkpoint_path, device, precision, use_tp, rank_group=None, group=None):
+    from MagicDec.Engine.SnapKV.model import Transformer
     with torch.device('meta'):
         model = Transformer.from_name(checkpoint_path.parent.name)
+
+    if "int8" in str(checkpoint_path):
+        print("Using int8 weight-only quantization!")
+        from MagicDec.Engine.quantize import WeightOnlyInt8QuantHandler
+        simple_quantizer = WeightOnlyInt8QuantHandler(model)
+        model = simple_quantizer.convert_for_runtime()
+
     checkpoint = torch.load(str(checkpoint_path), mmap=True, weights_only=True)
     if "model" in checkpoint and "stories" in str(checkpoint_path):
         checkpoint = checkpoint["model"]
@@ -252,8 +218,8 @@ def load_model(checkpoint_path, device, precision, use_tp, rank_group=None, grou
     return model.eval()
 
 
-def load_model_draft(checkpoint_path, device, precision, use_tp, rank_group=None, group=None):
-    import MagicDec.Engine.model_draft as draft
+def load_model_draft_snapKV(checkpoint_path, device, precision, use_tp, rank_group=None, group=None):
+    import MagicDec.Engine.SnapKV.model_draft as draft
     with torch.device('meta'):
         model = draft.Transformer.from_name(checkpoint_path.parent.name)
     checkpoint = torch.load(str(checkpoint_path), mmap=True, weights_only=True)
@@ -269,10 +235,35 @@ def load_model_draft(checkpoint_path, device, precision, use_tp, rank_group=None
     model = model.to(device=device, dtype=precision)
     return model.eval()
 
-def load_model_selfspec(checkpoint_path, device, precision, use_tp, rank_group=None, group=None):
-    import MagicDec.Engine.model_selfspec as selfspec
+def load_model_streamingLLM(checkpoint_path, device, precision, use_tp, rank_group=None, group=None):
+    from MagicDec.Engine.StreamingLLM.model import Transformer
     with torch.device('meta'):
-        model = selfspec.Transformer.from_name(checkpoint_path.parent.name)
+        model = Transformer.from_name(checkpoint_path.parent.name)
+
+    if "int8" in str(checkpoint_path):
+        print("Using int8 weight-only quantization!")
+        from MagicDec.Engine.quantize import WeightOnlyInt8QuantHandler
+        simple_quantizer = WeightOnlyInt8QuantHandler(model)
+        model = simple_quantizer.convert_for_runtime()
+
+    checkpoint = torch.load(str(checkpoint_path), mmap=True, weights_only=True)
+    if "model" in checkpoint and "stories" in str(checkpoint_path):
+        checkpoint = checkpoint["model"]
+    model.load_state_dict(checkpoint, assign=True)
+
+    if use_tp:
+        from MagicDec.Engine.tp import apply_tp
+        print("Applying tensor parallel to model ...")
+        apply_tp(model, rank_group, group=group)
+
+    model = model.to(device=device, dtype=precision)
+    return model.eval()
+
+
+def load_model_draft_streamingLLM(checkpoint_path, device, precision, use_tp, rank_group=None, group=None):
+    import MagicDec.Engine.StreamingLLM.model_draft as draft
+    with torch.device('meta'):
+        model = draft.Transformer.from_name(checkpoint_path.parent.name)
     checkpoint = torch.load(str(checkpoint_path), mmap=True, weights_only=True)
     if "model" in checkpoint and "stories" in str(checkpoint_path):
         checkpoint = checkpoint["model"]
