@@ -313,6 +313,8 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
     if use_tp:
         dist.barrier()
 
+print(f"Final tokens per second :{num_gen_tokens/total_time}")
+
 # if rank == 0:
 #     with open("result.txt", "a") as file:
 #         file.write("total time :{:.5f}s, time per iter :{:.5f}s, decoding step: {}, large model step: {}, avg latency: {} \n".format(total_time, total_time / target_steps, num_gen_tokens, target_steps, total_time / num_gen_tokens * BATCH_SIZE))

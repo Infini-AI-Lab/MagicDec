@@ -94,9 +94,11 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
     if args.printoutput:
         for i in range(BATCH_SIZE):
             print(tokenizer.decode(output[i, args.prefix_len:]))
-    print(f"Tokens per second :{total_time/model_steps}")
+    print(f"Tokens per second :{BATCH_SIZE*(model_steps/total_time)}")
     if step < 5:
         total_time = 0.0
         model_steps = 0
     if use_tp:
         dist.barrier()
+
+print(f"Final tokens per second :{BATCH_SIZE*(model_steps/total_time)}")

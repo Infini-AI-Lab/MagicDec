@@ -27,7 +27,7 @@
 ## Update
  - Supports flashinfer and paged attention to further accelerate inference.
  - Supports SnapKV-based drafting for higher speculation quality.
- - Supppots Qwen2.5-[7B,14B,32B], Yi-1.5-[6B,34B], Mistral-7B-v0.1 and Mistral-7B-v0.1
+ - Supppots Qwen2.5-[7B,14B,32B], Yi-1.5-[6B,34B], Mistral-7B-v0.1 and Mistral-7B-v0.1.
  - Please make sure PyTorch version greater than 2.5 to use the new features like custom all-reduce.
 
 ## Installation
