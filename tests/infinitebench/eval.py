@@ -210,7 +210,6 @@ print(f"Max tokens: {MAX_LEN_TARGET}")
 
 # prepare dataset
 dataset = prepare_data(examples, tokenizer, data_name, args.model_name, args.prefix_len, args.data_dir, args.start_idx, args.stop_idx)
-
 dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=False, drop_last=True)
 num_eval_steps = min(10, len(dataloader))
 
@@ -341,7 +340,8 @@ for step, batch in tqdm(enumerate(dataloader), total=num_eval_steps):
     print("total time :{:.5f}s, time per iter :{:.5f}s, decoding step: {}, large model step: {}".format(total_time, total_time / target_steps, num_gen_tokens, target_steps))
     if benchmark:
         print("target time :{:.5f}s, draft time :{:.5f}s, verify loop : {}, avg generate len per sentence: {}".format(target_time/target_steps, draft_time / target_steps, verify_loop/target_steps, num_gen_tokens/target_steps/BATCH_SIZE))
-    if step < 5:   # TODO: revert to 10?
+    
+    if step < 3:   # TODO: revert to 10?
         total_time = 0.0
         num_gen_tokens = 0
         target_steps = 0
